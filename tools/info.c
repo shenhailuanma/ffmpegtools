@@ -26,7 +26,7 @@ int get_info_by_param(char *src, char *param)
     AVFormatContext *ctx = NULL;
 
     if(src == NULL || param == NULL)
-        return -1
+        return -1;
 
     av_register_all();
 
