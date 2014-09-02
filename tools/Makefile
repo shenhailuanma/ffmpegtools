@@ -6,6 +6,7 @@ CPPFLAGS = -I. -I$(FFMPEGDIR)/include
 CFLAGS += -Wall -std=c99 -g
 LDFLAGS += -lpthread -ldl -lrt
 
+
 Source := info.c 
 OBJECTS := $(patsubst %.c, %.o, $(Source))
 
