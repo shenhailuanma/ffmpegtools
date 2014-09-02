@@ -49,7 +49,7 @@ int get_info_by_param(char *src, char *param)
     printf("bitrate:%d\n", ctx->bit_rate);
 
     if(strcmp(param, "duration") == 0){
-        duration = ctx->duration;
+        duration = ctx->duration/AV_TIME_BASE;
         printf("get duration:%d\n",duration);
         return duration;
     }else{
