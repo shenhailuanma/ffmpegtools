@@ -25,6 +25,9 @@ int get_info_by_param(char *src, char *param)
 
     AVFormatContext *ctx = NULL;
 
+    if(src == NULL || param == NULL)
+        return -1
+
     av_register_all();
 
     // open the media file
@@ -44,8 +47,10 @@ int get_info_by_param(char *src, char *param)
     //av_dump_format(ctx, 0, ctx->filename, 0);
     printf("filename:%s\n", ctx->filename);
     printf("bitrate:%d\n", ctx->bit_rate);
-
-    if(strcpy(param, "duration") == 0){
+        duration = ctx->duration;
+        printf("get duration:%d\n",duration);
+    if(strcmp(param, "duration") == 0){
+        if()
         duration = ctx->duration;
         printf("get duration:%d\n",duration);
         return duration;
