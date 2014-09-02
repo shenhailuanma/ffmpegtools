@@ -41,6 +41,9 @@ int get_info_by_param(char *src, char *param)
     }
     printf("filename:%s\n", ctx->filename);
     printf("bitrate:%d\n", ctx->bit_rate);
+        duration = ctx->duration;
+        printf("get duration:%d",duration);
+        
     av_dump_format(ctx, 0, ctx->filename, 0);
     printf("filename:%s\n", ctx->filename);
     printf("bitrate:%d\n", ctx->bit_rate);
