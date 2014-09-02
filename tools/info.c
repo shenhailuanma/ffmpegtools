@@ -14,7 +14,7 @@ static void print_help(void)
     printf("\t./xspeed -i /data/video/source.mp4 -s 2 -o /tmp/out.mp4\n");
 }
 
-
+/*
 int get_info_by_param(char *src, char *param)
 {
 
@@ -62,13 +62,61 @@ int get_info_by_param(char *src, char *param)
     
     return 0;
 }
+*/
+
+int get_duration(char *src)
+{
 
 
-int main(void)
+    int ret;
+    int val;
+    int duration = 0;
+
+    AVFormatContext *ctx = NULL;
+
+    if(src == NULL)
+        return -1;
+
+    av_register_all();
+
+    // open the media file
+    ret = avformat_open_input(&ctx, src, NULL, NULL);
+    if (ret < 0) {
+        printf("[error] error open stream: '%s', error code: %d \n", src, ret);
+        return -1;
+    }
+
+    ret = avformat_find_stream_info(ctx, NULL);
+    if (ret < 0) {
+        printf("[error] could not find stream info.\n");
+        return -1;
+    }
+
+
+    //av_dump_format(ctx, 0, ctx->filename, 0);
+    printf("filename:%s\n", ctx->filename);
+    printf("bitrate:%d\n", ctx->bit_rate);
+
+    if(ctx->duration != AV_NOPTS_VALUE){
+        duration = ctx->duration/AV_TIME_BASE;
+        printf("get duration:%d\n",duration);
+        return duration;
+    }else{
+        return -1;
+    }
+
+
+    avformat_close_input(&ctx);
+
+    
+    return 0;
+}
+
+int main(int argc, char ** argv)
 {
     int ret = 0;
 
-    ret = get_info_by_param("/tmp/out1.mp4","duration");
+    ret = get_duration(argv[1]);
     printf("get duration:%d.",ret);
 
     return 0;
