@@ -40,10 +40,12 @@ int get_info_by_param(char *src, char *param)
     }
 
     av_dump_format(ctx, 0, ctx->filename, 0);
+    printf("filename:%s\n", ctx->filename);
+    printf("bitrate:%d\n", ctx->bit_rate);
 
     if(strcpy(param, "duration") == 0){
-        printf("get duration:%d", ctx->duration);
-        return ctx->duration;
+        printf("get duration:%d", (int)ctx->duration);
+        return (int)ctx->duration;
     }else{
         return -1;
     }
