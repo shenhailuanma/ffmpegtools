@@ -57,8 +57,10 @@ int get_info_by_param(char *src, char *param)
 
 int main(void)
 {
+    int ret = 0;
 
-    get_info("/tmp/out1.mp4","duration");
+    ret = get_info_by_param("/tmp/out1.mp4","duration");
+    printf("get duration:%d.",ret);
 
     return 0;
 }
