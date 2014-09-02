@@ -4,16 +4,6 @@
 
 #include "libavformat/avformat.h"
 
-static void print_help(void)
-{
-    printf("Usage: ./xspeed  -i <input_file> -s <speed_number> -o <output_file>\n");
-    printf("\tinput_file: the input file.\n");
-    printf("\tspeed_number: the number of speed change.\n");
-    printf("\toutput_file: the output file.\n");
-    printf("For example:\n");
-    printf("\t./xspeed -i /data/video/source.mp4 -s 2 -o /tmp/out.mp4\n");
-}
-
 /*
 int get_info_by_param(char *src, char *param)
 {
@@ -117,7 +107,7 @@ int main(int argc, char ** argv)
     int ret = 0;
 
     ret = get_duration(argv[1]);
-    printf("get duration:%d.",ret);
+    printf("get duration:%d.\n",ret);
 
     return 0;
 }
