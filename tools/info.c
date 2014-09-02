@@ -29,13 +29,13 @@ int get_info_by_param(char *src, char *param)
     // open the media file
     ret = avformat_open_input(&ctx, src, NULL, NULL);
     if (ret < 0) {
-        ERR("error open stream: '%s', error code: %d \n", src, ret);
+        printf("[error] error open stream: '%s', error code: %d \n", src, ret);
         return -1;
     }
 
     ret = avformat_find_stream_info(ctx, NULL);
     if (ret < 0) {
-        ERR("could not find stream info.\n");
+        printf("[error] could not find stream info.\n");
         return -1;
     }
 
@@ -59,4 +59,6 @@ int main(void)
 {
 
     get_info("/tmp/out1.mp4","duration");
+
+    return 0;
 }
