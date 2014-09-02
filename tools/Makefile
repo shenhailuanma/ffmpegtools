@@ -3,7 +3,7 @@ INSTALLDIR = ./_release
 FFMPEGDIR = /home/tvie/work/ffmpegtools/_release_ffmpeg_2_3_3
 
 CPPFLAGS = -I. -I$(FFMPEGDIR)/include 
-CFLAGS += -Wall -std=c99
+CFLAGS += -Wall -std=c99 -g
 LDFLAGS += -lpthread -ldl -lrt
 
 Source := info.c 
@@ -15,7 +15,7 @@ BUILD_ARCH = $(shell uname -m)
 
 all: info 
 	mkdir -p $(INSTALLDIR)/bin
-	install -m 755 xspeed $(INSTALLDIR)/bin/info
+	install -m 755 info $(INSTALLDIR)/bin/info
 
 
 info: $(OBJECTS) $(FFMPEGDIR)/lib/libavformat.a $(FFMPEGDIR)/lib/libavcodec.a \
