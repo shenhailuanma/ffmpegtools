@@ -5,11 +5,14 @@ set -e
 
 echo ${PWD}
 
-PREFIX=${PWD}_release_ffmpeg_2_3_3
-FFMPEG_TAR=ffmpeg-2.3.3.tar.bz2
+PREFIX=${PWD}/_release_ffmpeg_2_3_3
+FFMPEG_TAR=${PWD}/tarfiles/ffmpeg-2.3.3.tar.bz2
 
 function build_one  
 {
+mkdir -p _build
+pushd _build
+
 tar xf ${FFMPEG_TAR}
 pushd ffmpeg-2.3.3 
 
@@ -17,9 +20,11 @@ pushd ffmpeg-2.3.3
 
 make clean
 
-make
+#make
 
-make install
+#make install
+
+popd
 
 popd
 }
