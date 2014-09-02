@@ -21,7 +21,8 @@ int get_info_by_param(char *src, char *param)
 
     int ret;
     int val;
-    
+    int duration = 0;
+
     AVFormatContext *ctx = NULL;
 
     av_register_all();
@@ -44,8 +45,9 @@ int get_info_by_param(char *src, char *param)
     printf("bitrate:%d\n", ctx->bit_rate);
 
     if(strcpy(param, "duration") == 0){
-        printf("get duration:%d", (int)ctx->duration);
-        return (int)ctx->duration;
+        duration = ctx->duration;
+        printf("get duration:%d",duration);
+        return duration;
     }else{
         return -1;
     }
