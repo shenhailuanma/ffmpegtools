@@ -158,7 +158,7 @@ int jietu(char * src, int jietime, char * dest_path)
         printf("[warning] jietime <= 0, modify it to 0.\n");
         jietime = 0;
     }
-
+    printf("[debug] jietime=%d\n", jietime);
     av_register_all();
 
     //// open the input file
@@ -282,7 +282,7 @@ int jietu(char * src, int jietime, char * dest_path)
     if(input_video_timebase_den > 0 && input_video_stream_timebase_den > 0 && input_video_timebase_num > 0 && input_video_stream_timebase_num > 0 && input_video_ticks_per_frame > 0){
         video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num)/(input_video_timebase_den/(input_video_timebase_num*input_video_ticks_per_frame));
     }
-    printf("[debug] video_should_interval=%d\n", video_should_interval);
+    printf("[debug] video_should_interval=%d, jietime_by_timebase=%d\n", video_should_interval,jietime_by_timebase);
 
 
     // get the frame
