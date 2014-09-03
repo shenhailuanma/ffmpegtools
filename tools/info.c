@@ -259,8 +259,12 @@ int jietu(char * src, int jietime, char * dest_path)
     while(1){
         av_init_packet(&pkt);
         ret = av_read_frame(inctx, &pkt);
+        if(ret == AVERROR(EAGAIN)){
+            // EAGAIN means try again
+            continue;
+        }
         if(ret < 0){
-            printf("[error] av_read_frame error.");
+            printf("[error] av_read_frame error, ret=%d.\n",ret);
             return -1;
         }
 
