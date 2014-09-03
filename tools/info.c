@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "libavformat/avformat.h"
-#include <libavcodec/avcodec.h>
+#include "libavcodec/avcodec.h"
 
 
 /*
