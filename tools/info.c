@@ -290,7 +290,7 @@ int main(int argc, char ** argv)
     ret = zongshijian(argv[1]);
     printf("get duration:%d.\n",ret);
 
-    ret = jietu(argv[1], 1000*3, "/tmp/jietu.jpg");
+    ret = jietu(argv[1], argv[2], "/tmp/jietu.jpg");
     printf("jietu:%d.\n",ret);
 
     return 0;
