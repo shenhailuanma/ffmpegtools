@@ -239,7 +239,7 @@ int jietu(char * src, int jietime, char * dest_path)
             return -1;
         }
     }
-    
+
     // seek the jietu time
 
     // decode the frame
@@ -256,6 +256,9 @@ int main(int argc, char ** argv)
 
     ret = zongshijian(argv[1]);
     printf("get duration:%d.\n",ret);
+
+    ret = jietu(argv[1], 1000*3, "/tmp/jietu.jpg");
+    printf("jietu:%d.\n",ret);
 
     return 0;
 }
