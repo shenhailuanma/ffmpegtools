@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include "libavformat/avformat.h"
+#include <libavcodec/avcodec.h>
+
 
 /*
 int get_info_by_param(char *src, char *param)
@@ -247,7 +249,7 @@ int jietu(char * src, int jietime, char * dest_path)
     }
 
     // seek the jietu time, AV_TIME_BASE=1000000 
-    ret = av_seek_frame(ic, -1, jietime*1000, AVSEEK_FLAG_BACKWARD);
+    ret = av_seek_frame(inctx, -1, jietime*1000, AVSEEK_FLAG_BACKWARD);
     if (ret < 0) {
         printf("[error] could not seek to position %d\n", jietime);
         return -1;
