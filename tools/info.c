@@ -139,10 +139,16 @@ int jietu(char * src, int jietime, char * dest_path)
     AVCodecContext  * outVideoCodecCtx = NULL;
     AVCodec * outViedeCodec = NULL;
 
+    AVPacket pkt; 
 
     if(src == NULL || dest_path == NULL){
         printf("[error]: jietu input params NULL.\n");
         return -1;
+    }
+
+    if(jietime <= 0){
+        printf("[warning] jietime <= 0, modify it to 0.\n");
+        jietime = 0;
     }
 
     av_register_all();
@@ -240,7 +246,27 @@ int jietu(char * src, int jietime, char * dest_path)
         }
     }
 
-    // seek the jietu time
+    // seek the jietu time, AV_TIME_BASE=1000000 
+    ret = av_seek_frame(ic, -1, jietime*1000, AVSEEK_FLAG_BACKWARD);
+    if (ret < 0) {
+        printf("[error] could not seek to position %d\n", jietime);
+        return -1;
+    }
+
+    // get the frame
+    while(1){
+        av_init_packet(&pkt);
+        ret = av_read_frame(inctx, &pkt);
+        if(ret < 0){
+            printf("[error] av_read_frame error.");
+            return -1;
+        }
+
+        if(pkt.stream_index = input_video_stream_index){
+            printf("pkt dts: %lld \n", pkt.dts);
+            break;
+        }
+    }
 
     // decode the frame
 
