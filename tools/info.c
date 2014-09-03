@@ -168,7 +168,7 @@ int jietu(char * src, int jietime, char * dest_path)
         return -1;
     }
 
-
+    inctx->flags |= AVFMT_FLAG_GENPTS;
     av_dump_format(inctx, 0, inctx->filename, 0);
 
     // find the video stream

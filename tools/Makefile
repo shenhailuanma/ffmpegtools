@@ -20,7 +20,7 @@ all: info
 
 
 info: $(InfoOBJECTS) $(FFMPEGDIR)/lib/libavformat.a $(FFMPEGDIR)/lib/libavcodec.a \
-$(FFMPEGDIR)/lib/libavutil.a $(FFMPEGDIR)/lib/libswscale.a $(FFMPEGDIR)/lib/libswresample.a
+$(FFMPEGDIR)/lib/libavutil.a $(FFMPEGDIR)/lib/libswscale.a $(FFMPEGDIR)/lib/libswresample.a $(FFMPEGDIR)/lib/libavfilter.a
 	$(CC) $^ -o $@  -lm -lz -lbz2  $(CPPFLAGS) $(LDFLAGS) $(LINKFLAGS)
 
 clean:
