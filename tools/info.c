@@ -134,6 +134,10 @@ int jietu(char * src, int jietime, char * dest_path)
     int inWidth  = 0;
     int inHeight = 0;
     AVCodec * inViedeCodec = NULL;
+    int input_video_timebase_num  = 0;
+    int input_video_timebase_den  = 0;
+    int input_video_stream_timebase_num  = 0;
+    int input_video_stream_timebase_den  = 0;
 
     AVFormatContext * outctx = NULL;
     AVOutputFormat  * fmt = NULL;  // output format
@@ -178,6 +182,12 @@ int jietu(char * src, int jietime, char * dest_path)
             input_video_stream_index = i;
             inWidth  = inctx->streams[i]->codec->width;
             inHeight = inctx->streams[i]->codec->height;
+            input_video_timebase_num = inctx->streams[i]->codec->time_base.num;
+            input_video_timebase_den = inctx->streams[i]->codec->time_base.den;  // should not be 0
+            input_video_stream_timebase_num = inctx->streams[i]->time_base.num;
+            input_video_stream_timebase_den = inctx->streams[i]->time_base.den;  // should not be 0
+            printf("[debug] w:%d, h:%d, timebase.num:%d, timebase.den:%d, stream_timebase.num:%d, stream_timebase.den:%d\n", 
+                inWidth, inHeight, input_video_timebase_num, input_video_timebase_den, input_video_stream_timebase_num, input_video_stream_timebase_den);
             break;
         }
     }
@@ -255,6 +265,14 @@ int jietu(char * src, int jietime, char * dest_path)
         return -1;
     }
 
+    // get the input stream video should interval, interval=timebase/framerate, e.g. 1000/25=40ms
+    int video_should_interval = 40;
+    if(input_video_timebase_den > 0 && input_video_stream_timebase_den > 0 && input_video_timebase_num > 0 && input_video_stream_timebase_num > 0){
+        video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num)/(input_video_timebase_den/input_video_timebase_num);
+    }
+    printf("[debug] video_should_interval=%d\n", video_should_interval);
+
+    
     // get the frame
     while(1){
         av_init_packet(&pkt);
@@ -270,8 +288,13 @@ int jietu(char * src, int jietime, char * dest_path)
         }
 
         if(pkt.stream_index == input_video_stream_index){
-            printf("pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
-            break;
+            printf("[debug] pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
+            // if framerate=25, dts should: 1:0, 2:40, 3:80, 4:120
+            if(jietime >= pkt.dts && jietime < (pkt.dts+video_should_interval)){
+                printf("[debug] get the jietu frame, pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
+            
+                break;
+            }
         }
     }
 
