@@ -270,7 +270,7 @@ int jietu(char * src, int jietime, char * dest_path)
         }
 
         if(pkt.stream_index == input_video_stream_index){
-            printf("pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & PKT_FLAG_KEY);
+            printf("pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
             break;
         }
     }
