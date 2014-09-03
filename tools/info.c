@@ -199,7 +199,7 @@ int jietu(char * src, int jietime, char * dest_path)
                 printf("[error] get input_video_stream_timebase error.\n");
                 return -1;
             }
-            jietime_by_timebase = (jietime*input_video_stream_timebase_num/input_video_stream_timebase_den)/1000;
+            jietime_by_timebase = (jietime*input_video_stream_timebase_den/input_video_stream_timebase_num)/1000;
             break;
         }
     }
