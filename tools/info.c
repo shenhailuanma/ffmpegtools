@@ -261,6 +261,7 @@ int jietu(char * src, int jietime, char * dest_path)
         ret = av_read_frame(inctx, &pkt);
         if(ret == AVERROR(EAGAIN)){
             // EAGAIN means try again
+            printf("[warning] av_read_frame ret=%d, continue.\n", ret);
             continue;
         }
         if(ret < 0){
