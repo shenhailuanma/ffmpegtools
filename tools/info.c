@@ -348,7 +348,7 @@ int jietu(char * src, int jietime, char * dest_path)
         if(pkt.stream_index == input_video_stream_index){
             printf("[debug] pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
             // decode the video frame
-            ret = decode_video_packet(inViedeCodec, &pkt, &picture, &got_frame);
+            ret = decode_video_packet(inctx->streams[input_video_stream_index]->codec, &pkt, &picture, &got_frame);
             if(ret < 0 || got_frame==0){
                 printf("[error] decode video packet error.\n");
                 return -1;
@@ -359,7 +359,7 @@ int jietu(char * src, int jietime, char * dest_path)
                 printf("[debug] get the jietu frame, pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
                 // encode the picture
                 av_init_packet(&pkt);
-                ret = avcodec_encode_video2(outViedeCodec, &pkt, &picture, &got_encode_frame);
+                ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, &picture, &got_encode_frame);
                 if(ret < 0 || got_encode_frame==0){
                     printf("[error] encode picture error.\n");
                     return -1;
@@ -386,7 +386,7 @@ int main(int argc, char ** argv)
     ret = zongshijian("/home/tvie/lbld_720p_v3min.mp4");
     printf("get duration:%d.\n",ret);
 
-    ret = jietu(argv[1], 40*34, "/tmp/jietu.jpg");
+    ret = jietu("/home/tvie/lbld_720p_v3min.mp4", 40*34, "/tmp/jietu.jpg");
     printf("jietu:%d.\n",ret);
 
     return 0;
