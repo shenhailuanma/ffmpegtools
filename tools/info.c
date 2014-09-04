@@ -338,7 +338,7 @@ int jietu(char * src, int jietime, char * dest_path)
     int video_should_interval = 40;
     if(input_video_timebase_den > 0 && input_video_stream_timebase_den > 0 && input_video_timebase_num > 0 && input_video_stream_timebase_num > 0 && input_video_ticks_per_frame > 0){
         //video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num)/(input_video_timebase_den/(input_video_timebase_num*input_video_ticks_per_frame));
-        video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num) / (input_fps_den/input_fps_num);
+        video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num) / (input_fps_num/input_fps_den);
     }
     printf("[debug] video_should_interval=%d, jietime_by_timebase=%d\n", video_should_interval,jietime_by_timebase);
 
