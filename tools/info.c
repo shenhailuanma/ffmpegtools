@@ -135,7 +135,7 @@ static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame
     //}
 
     if(!got_picture){
-        pritnf("[error] no picture gotten.\n");
+        printf("[error] no picture gotten.\n");
         return -1;
     }
 
@@ -311,7 +311,7 @@ int jietu(char * src, int jietime, char * dest_path)
     }
 
     if(avformat_write_header(outctx, NULL)){
-        pritnf("[error] outctx av_write_header error!\n");
+        printf("[error] outctx av_write_header error!\n");
         return -1;
     }
 
