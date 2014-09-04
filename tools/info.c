@@ -592,7 +592,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
 
     //AVMetadataTag *t = NULL;
     //while ((t = av_metadata_get(ctx->metadata, "", t, AV_METADATA_IGNORE_SUFFIX)))
-    //    av_metadata_set2(&output_context->metadata, t->key, t->value, AV_METADATA_DONT_OVERWRITE);
+    //    av_metadata_set2(&outctx->metadata, t->key, t->value, AV_METADATA_DONT_OVERWRITE);
 
     if(video_st != NULL){
 
@@ -604,13 +604,13 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
         outVideoCodecCtx->codec_type = inctx->streams[input_video_stream_index]->codec->codec_type;
         /*
         (!outVideoCodecCtx->codec_tag){
-                if( !output_context->oformat->codec_tag
-                   || av_codec_get_id (output_context->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_tag) == outVideoCodecCtx->codec_id
-                   || av_codec_get_tag(output_context->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_id) <= 0)
+                if( !outctx->oformat->codec_tag
+                   || av_codec_get_id (outctx->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_tag) == outVideoCodecCtx->codec_id
+                   || av_codec_get_tag(outctx->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_id) <= 0)
                     outVideoCodecCtx->codec_tag = inctx->streams[i]->codec->codec_tag;
         }
         */
-        outVideoCodecCtx->bit_rate = inctx->streams[input_video_stream_index]->codecc->bit_rate;
+        outVideoCodecCtx->bit_rate = inctx->streams[input_video_stream_index]->codec->bit_rate;
         outVideoCodecCtx->bit_rate_tolerance = inctx->streams[input_video_stream_index]->codec->bit_rate_tolerance;
 
         outVideoCodecCtx->rc_buffer_size = inctx->streams[input_video_stream_index]->codec->rc_buffer_size;
@@ -622,9 +622,9 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
         outVideoCodecCtx->height = inctx->streams[input_video_stream_index]->codec->height;
        // outVideoCodecCtx->height = 480;
         outVideoCodecCtx->has_b_frames = inctx->streams[input_video_stream_index]->codec->has_b_frames;
-    printf("width:%d, height:%d\n", outVideoCodecCtx->width, outVideoCodecCtx->height);
+        printf("width:%d, height:%d\n", outVideoCodecCtx->width, outVideoCodecCtx->height);
         
-        if(output_context->oformat->flags & AVFMT_GLOBALHEADER)
+        if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
             outVideoCodecCtx->flags |= CODEC_FLAG_GLOBAL_HEADER;
 
         video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
