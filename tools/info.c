@@ -1,6 +1,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "libavformat/avformat.h"
 #include "libavcodec/avcodec.h"
@@ -397,10 +398,12 @@ int main(int argc, char ** argv)
 {
     int ret = 0;
 
-    ret = zongshijian("/home/tvie/lbld_720p_v3min.mp4");
+    ret = zongshijian(argv[1]);
+    //ret = zongshijian("/home/tvie/lbld_720p_v3min.mp4");
     printf("get duration:%d.\n",ret);
 
-    ret = jietu("/home/tvie/lbld_720p_v3min.mp4", 40*34, "/tmp/jietu.jpg");
+    ret = jietu(argv[1], atoi(argv[2]), "/tmp/jietu.jpg");
+    //ret = jietu("/home/tvie/lbld_720p_v3min.mp4", 40*34, "/tmp/jietu.jpg");
     printf("jietu:%d.\n",ret);
 
     return 0;
