@@ -399,6 +399,301 @@ int jietu(char * src, int jietime, char * dest_path)
         }
     }
 
+    // close ctx
+
+    return 0;
+}
+
+
+
+/*
+    Function: jieshipin
+    Input:  
+        src : source file path
+        starttime: the start time of the stream which you want to get. unit is ms, e.g. 4000 means 4 s.
+        endtime  : the end   time of the stream which you want to get. unit is ms, e.g. 4000 means 4 s.  
+        dest_path: the dest file path
+
+    Return:
+        0 : means ok
+        not 0 : means error
+*/
+int jieshipin(char * src, int starttime, int endtime, char * dest_path)
+{
+    int ret;
+    int i;
+
+    AVFormatContext * inctx = NULL;
+    int input_video_stream_index = -1;
+    int input_audio_stream_index = -1;
+    AVCodecContext  * inVideoCodecCtx = NULL;
+    int inWidth  = 0;
+    int inHeight = 0;
+    AVCodec * inViedeCodec = NULL;
+    int input_video_timebase_num  = 0;
+    int input_video_timebase_den  = 0;
+    int input_video_stream_timebase_num  = 0;
+    int input_video_stream_timebase_den  = 0;
+    int input_video_ticks_per_frame = 1;
+    int input_fps_num = 1;
+    int input_fps_den = 1;
+    int jietime_by_timebase;    // end time in video timebase
+    AVFrame picture;
+    int got_frame = 0;
+
+    AVFormatContext * outctx = NULL;
+    AVOutputFormat  * fmt = NULL;  // output format
+    AVStream        * video_st = NULL;    // output stream
+    AVCodecContext  * outVideoCodecCtx = NULL;
+    AVCodec * outViedeCodec = NULL;
+    int got_encode_frame = 0;
+
+    AVPacket pkt; 
+    int not_get_decode_frame = 0;
+    int64_t frist_video_packet_dts = 0;
+    int64_t frist_audio_packet_dts = 0;
+
+    if(src == NULL || dest_path == NULL){
+        printf("[error]: jietu input params NULL.\n");
+        return -1;
+    }
+
+    if(starttime <= 0){
+        printf("[warning] starttime <= 0, modify it to 0.\n");
+        starttime = 0;
+    }
+    printf("[debug] starttime=%d\n", starttime);
+
+
+
+    av_register_all();
+
+    //// open the input file
+    ret = avformat_open_input(&inctx, src, NULL, NULL);
+    if (ret < 0 || inctx == NULL) {
+        printf("[error] error open stream: '%s', error code: %d \n", src, ret);
+        return -1;
+    }
+
+    ret = avformat_find_stream_info(inctx, NULL);
+    if (ret < 0) {
+        printf("[error] could not find stream info.\n");
+        return -1;
+    }
+
+    inctx->flags |= AVFMT_FLAG_GENPTS;
+    av_dump_format(inctx, 0, inctx->filename, 0);
+
+    // find the video stream
+    input_video_stream_index = -1;
+    for (i = 0; i < inctx->nb_streams; i++) {
+        if (input_video_stream_index == -1 && inctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+            input_video_stream_index = i;
+            inWidth  = inctx->streams[i]->codec->width;
+            inHeight = inctx->streams[i]->codec->height;
+            input_video_timebase_num = inctx->streams[i]->codec->time_base.num;
+            input_video_timebase_den = inctx->streams[i]->codec->time_base.den;  // should not be 0
+            input_video_stream_timebase_num = inctx->streams[i]->time_base.num;
+            input_video_stream_timebase_den = inctx->streams[i]->time_base.den;  // should not be 0
+            input_video_ticks_per_frame = inctx->streams[i]->codec->ticks_per_frame;
+
+            printf("[debug] w:%d, h:%d, timebase.num:%d, timebase.den:%d, stream_timebase.num:%d, stream_timebase.den:%d, ticks_per_frame:%d\n", 
+                inWidth, inHeight, input_video_timebase_num, input_video_timebase_den, 
+                input_video_stream_timebase_num, input_video_stream_timebase_den, input_video_ticks_per_frame);
+
+            // trans jietime to video stream timebase.
+            if(input_video_stream_timebase_num <= 0 || input_video_stream_timebase_den <= 0){
+                printf("[error] get input_video_stream_timebase error.\n");
+                return -1;
+            }
+            jietime_by_timebase = (endtime*input_video_stream_timebase_den/input_video_stream_timebase_num)/1000;
+
+            // get fps
+            input_fps_den = inctx->streams[i]->r_frame_rate.den;
+            input_fps_num = inctx->streams[i]->r_frame_rate.num;
+
+            printf("[debug] input video fps %d/%d\n", input_fps_num, input_fps_den);
+            break;
+        }
+    }
+
+    if(input_video_stream_index == -1){
+        printf("[error] not found video stream.\n");
+        return -1;
+    }
+
+    /*  
+    //// fix me: decode is too slow, not use yet
+    // open input video decodec
+    inViedeCodec = avcodec_find_decoder(inctx->streams[input_video_stream_index]->codec->codec_id);
+    if(inViedeCodec == NULL){
+        printf("[error] inViedeCodec %d not found !\n", inctx->streams[input_video_stream_index]->codec->codec_id);
+        return -1;
+    }else{
+        // open it 
+        ret = avcodec_open2(inctx->streams[input_video_stream_index]->codec, inViedeCodec, NULL);
+        if (ret < 0) {
+            printf("[error] could not open codec\n");
+            return -1;
+        }
+    }
+    */
+
+    //// open the output file
+    outctx = avformat_alloc_context();
+    fmt = av_guess_format("mjpeg", NULL, NULL);
+    if(fmt == NULL){
+        printf("[error] guess format mjepg error.\n");
+        return -1;
+    }
+    outctx->oformat = fmt;  
+
+    if (avio_open(&outctx->pb, dest_path, AVIO_FLAG_READ_WRITE) < 0){
+        printf("[error] open output file.\n");
+        return -1;
+    }
+
+    video_st = av_new_stream(outctx, outctx->nb_streams);
+    if (video_st==NULL){
+        printf("[error] av_new_stream error.\n");
+        return -1;
+    }
+
+    avcodec_get_context_defaults3(video_st->codec, NULL);
+    outVideoCodecCtx = video_st->codec;
+    outVideoCodecCtx->codec_id = fmt->video_codec;
+    outVideoCodecCtx->codec_type = AVMEDIA_TYPE_VIDEO;
+    outVideoCodecCtx->pix_fmt = PIX_FMT_YUVJ420P;
+
+    outVideoCodecCtx->width  = inWidth;  // out width same as input width
+    outVideoCodecCtx->height = inHeight; // out height same as input height
+
+    outVideoCodecCtx->time_base.num = 1;  
+    outVideoCodecCtx->time_base.den = 25;   
+
+    av_dump_format(outctx, 0, dest_path, 1);  
+
+    /*
+    //// fix me: encode video is too slow, not use yet
+    // open the output encoder
+    outViedeCodec = avcodec_find_encoder(outVideoCodecCtx->codec_id);
+    if(outViedeCodec == NULL){
+        printf("[error] outViedeCodec %d not found !\n", outVideoCodecCtx->codec_id);
+        return -1;
+    }else{
+        // open it 
+        ret = avcodec_open2(outVideoCodecCtx, outViedeCodec, NULL);
+        if (ret < 0) {
+            printf("[error] could not open codec\n");
+            return -1;
+        }
+    }
+
+    if(avformat_write_header(outctx, NULL)){
+        printf("[error] outctx av_write_header error!\n");
+        return -1;
+    }
+    */
+
+    // seek the jietu time, AV_TIME_BASE=1000000 
+    ret = av_seek_frame(inctx, -1, starttime*1000, AVSEEK_FLAG_BACKWARD);
+    if (ret < 0) {
+        printf("[error] could not seek to position %d\n", starttime);
+        return -1;
+    }
+
+    // get the input stream video should interval, interval=timebase/framerate, e.g. 1000/25=40ms
+    int video_should_interval = 40;
+    if(input_video_timebase_den > 0 && input_video_stream_timebase_den > 0 && input_video_timebase_num > 0 && input_video_stream_timebase_num > 0 && input_video_ticks_per_frame > 0){
+        //video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num)/(input_video_timebase_den/(input_video_timebase_num*input_video_ticks_per_frame));
+        video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num) / (input_fps_num/input_fps_den);
+    }
+    printf("[debug] video_should_interval=%d, jietime_by_timebase=%d\n", video_should_interval,jietime_by_timebase);
+
+    not_get_decode_frame = 0;
+    // get the frame
+    while(1){
+        av_init_packet(&pkt);
+        pkt.data = NULL;
+        pkt.size = 0;
+        ret = av_read_frame(inctx, &pkt);
+        if(ret == AVERROR(EAGAIN)){
+            // EAGAIN means try again
+            printf("[warning] av_read_frame ret=%d, continue.\n", ret);
+            continue;
+        }
+        if(ret == AVERROR_EOF){
+            printf("[warning] av_read_frame ret=AVERROR_EOF, break.\n");
+            break;
+        }
+        if(ret < 0){
+            printf("[error] av_read_frame error, ret=%d.\n",ret);
+            return -1;
+        }
+
+        if(pkt.stream_index == input_video_stream_index){
+            printf("[debug] pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
+            /*
+            // decode the video frame
+            ret = decode_video_packet(inctx->streams[input_video_stream_index]->codec, &pkt, &picture, &got_frame);
+            if(ret < 0 || got_frame==0){
+                printf("[debug] decode video , bug not get frame.\n");
+                //return -1;
+                not_get_decode_frame += 1;
+                if(not_get_decode_frame > 10){
+                    printf("[error] long times for not_get_decode_frame:%d\n", not_get_decode_frame);
+                    return -1;
+                }
+                continue;
+            }
+            */
+            if(frist_video_packet_dts == 0){
+                frist_video_packet_dts = pkt.dts;
+            }
+            // break until dts >= endtime
+            if(pkt.dts < jietime_by_timebase){
+                printf("[debug] get the jietu frame, picture pts: %lld\n", (pkt.dts - video_should_interval*not_get_decode_frame));
+                /*
+                // encode the picture
+                av_init_packet(&pkt);
+                pkt.data = NULL;
+                pkt.size = 0;
+                ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, &picture, &got_encode_frame);
+                if(ret < 0 || got_encode_frame==0){
+                    printf("[error] encode picture error.\n");
+                    return -1;
+                }
+                */
+
+                // write the pkt to stream
+                pkt.stream_index = input_video_stream_index;
+                pkt.dts = pkt.dts - frist_video_packet_dts;
+                pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
+                ret = av_write_frame(outctx, &pkt);
+                //av_write_trailer(outctx);
+            }else{
+                printf("[debug] at the end time, stop.\n");
+                break;
+            }
+        }else if(pkt.stream_index == input_audio_stream_index){
+            if(frist_audio_packet_dts == 0){
+                frist_audio_packet_dts = pkt.dts;
+            }
+            // if audio pkt , write
+            pkt.stream_index = input_audio_stream_index;
+            pkt.dts = pkt.dts - frist_audio_packet_dts;
+            pkt.pts = pkt.pts - frist_audio_packet_dts + 2*video_should_interval;
+            ret = av_write_frame(outctx, &pkt);
+
+        }
+    }
+
+    // end of the stream
+    av_write_trailer(outctx);
+
+    // close ctx
+
+
     return 0;
 }
 
@@ -407,13 +702,16 @@ int main(int argc, char ** argv)
 {
     int ret = 0;
 
-    ret = zongshijian(argv[1]);
+    //ret = zongshijian(argv[1]);
     //ret = zongshijian("/home/tvie/lbld_720p_v3min.mp4");
-    printf("get duration:%d.\n",ret);
+    //printf("get duration:%d.\n",ret);
 
-    ret = jietu(argv[1], atoi(argv[2]), "/tmp/jietu.jpg");
+   // ret = jietu(argv[1], atoi(argv[2]), "/tmp/jietu.jpg");
     //ret = jietu("/home/tvie/lbld_720p_v3min.mp4", 40*34, "/tmp/jietu.jpg");
-    printf("jietu:%d.\n",ret);
+    //printf("jietu:%d.\n",ret);
+
+    ret = jieshipin("/home/tvie/lbld_720p_v3min.mp4", 30000, (180-30)*1000, "/tmp/jieshipin.mp4");
+    printf("jieshipin: %d\n", ret);
 
     return 0;
 }
