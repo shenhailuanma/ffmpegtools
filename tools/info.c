@@ -112,6 +112,43 @@ int zongshijian(char *src)
     return 0;
 }
 
+
+static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame * picture, int * got_frame)
+{
+    printf("[debug] decode video pkt.");
+    avcodec_get_frame_defaults(picture);
+
+
+    int got_picture;
+
+    *got_frame = 0;
+
+    int ret = avcodec_decode_video2(ctx, picture, &got_picture, packet);
+    if (ret < 0) {
+        printf("[error] video frame decode error for pkt: %"PRId64" \n", packet->pts);
+        return -1;
+    }
+
+    int64_t pts = 0;
+    //if (picture->opaque && *(int64_t*) picture->opaque != AV_NOPTS_VALUE) {
+     //   pts = *(int64_t *) picture->opaque;
+    //}
+
+    if(!got_picture){
+        pritnf("[error] no picture gotten.\n");
+        return -1;
+    }
+
+    picture->pts = pts;
+    picture->pict_type = 0;
+    printf("[debug] got video pic, type:%d, pts:%"PRId64" \n", picture->pict_type, picture->pts);
+ 
+
+    return 0;
+}
+
+
+
 /*
     Function: jietu
     Input:  
@@ -140,12 +177,15 @@ int jietu(char * src, int jietime, char * dest_path)
     int input_video_stream_timebase_den  = 0;
     int input_video_ticks_per_frame = 1;
     int jietime_by_timebase;
+    AVFrame picture;
+    int got_frame = 0;
 
     AVFormatContext * outctx = NULL;
     AVOutputFormat  * fmt = NULL;  // output format
     AVStream        * video_st = NULL;    // output stream
     AVCodecContext  * outVideoCodecCtx = NULL;
     AVCodec * outViedeCodec = NULL;
+    int got_encode_frame = 0;
 
     AVPacket pkt; 
 
@@ -270,6 +310,12 @@ int jietu(char * src, int jietime, char * dest_path)
         }
     }
 
+    if(avformat_write_header(outctx, NULL)){
+        pritnf("[error] outctx av_write_header error!\n");
+        return -1;
+    }
+
+
     // seek the jietu time, AV_TIME_BASE=1000000 
     ret = av_seek_frame(inctx, -1, jietime*1000, AVSEEK_FLAG_BACKWARD);
     if (ret < 0) {
@@ -301,18 +347,33 @@ int jietu(char * src, int jietime, char * dest_path)
 
         if(pkt.stream_index == input_video_stream_index){
             printf("[debug] pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
+            // decode the video frame
+            ret = decode_video_packet(inViedeCodec, &pkt, &picture, &got_frame);
+            if(ret < 0 || got_frame==0){
+                printf("[error] decode video packet error.\n");
+                return -1;
+            }
+
             // if framerate=25, dts should: 1:0, 2:40, 3:80, 4:120
             if(jietime_by_timebase >= pkt.dts && jietime_by_timebase < (pkt.dts+video_should_interval)){
                 printf("[debug] get the jietu frame, pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
-            
+                // encode the picture
+                av_init_packet(&pkt);
+                ret = avcodec_encode_video2(outViedeCodec, &pkt, &picture, &got_encode_frame);
+                if(ret < 0 || got_encode_frame==0){
+                    printf("[error] encode picture error.\n");
+                    return -1;
+                }
+
+                // write the pkt to stream
+                pkt.stream_index = input_video_stream_index;
+                ret = av_write_frame(outctx, &pkt);
+                av_write_trailer(outctx);
+
                 break;
             }
         }
     }
-
-    // decode the frame
-
-    // encode the frame to jpg format
 
     return 0;
 }
