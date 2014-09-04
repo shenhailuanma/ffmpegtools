@@ -513,7 +513,12 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
             input_fps_num = inctx->streams[i]->r_frame_rate.num;
 
             printf("[debug] input video fps %d/%d\n", input_fps_num, input_fps_den);
-            break;
+            
+        }
+        if(input_audio_stream_index == -1 && inctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO){
+
+            input_audio_stream_index = i;
+            printf("[debug] input_audio_stream_index=%d\n", input_audio_stream_index);
         }
     }
 
@@ -541,11 +546,18 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
 
     //// open the output file
     outctx = avformat_alloc_context();
-    fmt = av_guess_format("mjpeg", NULL, NULL);
-    if(fmt == NULL){
-        printf("[error] guess format mjepg error.\n");
+    if(strncmp(inctx->iformat->name, "ts", sizeof("ts")) == 0){
+        fmt = av_guess_format("mpegts", NULL, NULL);
+    } else if(strncmp(inctx->iformat->name, "flv", sizeof("flv")) == 0){
+        fmt = av_guess_format("flv", NULL, NULL);
+    } else {
+        fmt = av_guess_format("mp4", NULL, NULL);
+    }
+    if (!fmt) {
+        printf("[error] Could not find %s format", inctx->iformat->name);
         return -1;
     }
+
     outctx->oformat = fmt;  
 
     if (avio_open(&outctx->pb, dest_path, AVIO_FLAG_READ_WRITE) < 0){
@@ -570,6 +582,56 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
 
     outVideoCodecCtx->time_base.num = 1;  
     outVideoCodecCtx->time_base.den = 25;   
+
+
+
+    AVStream *video_stream;
+    AVStream *audio_stream;
+
+    int video_extra_size;
+
+    //AVMetadataTag *t = NULL;
+    //while ((t = av_metadata_get(ctx->metadata, "", t, AV_METADATA_IGNORE_SUFFIX)))
+    //    av_metadata_set2(&output_context->metadata, t->key, t->value, AV_METADATA_DONT_OVERWRITE);
+
+    if(video_st != NULL){
+
+        video_st->time_base = inctx->streams[input_video_stream_index]->time_base;
+        avcodec_get_context_defaults3(video_st->codec, NULL);
+        outVideoCodecCtx = video_st->codec;
+
+        outVideoCodecCtx->codec_id = inctx->streams[input_video_stream_index]->codec->codec_id;
+        outVideoCodecCtx->codec_type = inctx->streams[input_video_stream_index]->codec->codec_type;
+        /*
+        (!outVideoCodecCtx->codec_tag){
+                if( !output_context->oformat->codec_tag
+                   || av_codec_get_id (output_context->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_tag) == outVideoCodecCtx->codec_id
+                   || av_codec_get_tag(output_context->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_id) <= 0)
+                    outVideoCodecCtx->codec_tag = inctx->streams[i]->codec->codec_tag;
+        }
+        */
+        outVideoCodecCtx->bit_rate = inctx->streams[input_video_stream_index]->codecc->bit_rate;
+        outVideoCodecCtx->bit_rate_tolerance = inctx->streams[input_video_stream_index]->codec->bit_rate_tolerance;
+
+        outVideoCodecCtx->rc_buffer_size = inctx->streams[input_video_stream_index]->codec->rc_buffer_size;
+        outVideoCodecCtx->pix_fmt = inctx->streams[input_video_stream_index]->codec->pix_fmt;
+        outVideoCodecCtx->time_base = inctx->streams[input_video_stream_index]->codec->time_base;  
+
+        outVideoCodecCtx->width = inctx->streams[input_video_stream_index]->codec->width;
+       // outVideoCodecCtx->width = 640;
+        outVideoCodecCtx->height = inctx->streams[input_video_stream_index]->codec->height;
+       // outVideoCodecCtx->height = 480;
+        outVideoCodecCtx->has_b_frames = inctx->streams[input_video_stream_index]->codec->has_b_frames;
+    printf("width:%d, height:%d\n", outVideoCodecCtx->width, outVideoCodecCtx->height);
+        
+        if(output_context->oformat->flags & AVFMT_GLOBALHEADER)
+            outVideoCodecCtx->flags |= CODEC_FLAG_GLOBAL_HEADER;
+
+        video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
+        outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
+        memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
+        outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
+    }
 
     av_dump_format(outctx, 0, dest_path, 1);  
 
@@ -669,7 +731,11 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
                 pkt.stream_index = input_video_stream_index;
                 pkt.dts = pkt.dts - frist_video_packet_dts;
                 pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
-                ret = av_write_frame(outctx, &pkt);
+                ret = av_interleaved_write_frame(outctx, &pkt);
+                if (ret < 0) {
+                    printf("[error] Could not write frame of stream: %d\n", ret);
+                    return -1;
+                }
                 //av_write_trailer(outctx);
             }else{
                 printf("[debug] at the end time, stop.\n");
@@ -683,8 +749,11 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
             pkt.stream_index = input_audio_stream_index;
             pkt.dts = pkt.dts - frist_audio_packet_dts;
             pkt.pts = pkt.pts - frist_audio_packet_dts + 2*video_should_interval;
-            ret = av_write_frame(outctx, &pkt);
-
+            ret = av_interleaved_write_frame(outctx, &pkt);
+            if (ret < 0) {
+                printf("[error] Could not write frame of stream: %d\n", ret);
+                return -1;
+            }
         }
     }
 
