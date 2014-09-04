@@ -115,7 +115,7 @@ int zongshijian(char *src)
 
 static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame * picture, int * got_frame)
 {
-    printf("[debug] decode video pkt.");
+    printf("[debug] decode video pkt.\n");
     avcodec_get_frame_defaults(picture);
 
 
@@ -137,12 +137,12 @@ static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame
     if(!got_picture){
         printf("[error] no picture gotten.\n");
         return -1;
-    }
+    }else{
+        picture->pts = pts;
+        picture->pict_type = 0;
+        printf("[debug] got video pic, type:%d, pts:%"PRId64" \n", picture->pict_type, picture->pts);
 
-    picture->pts = pts;
-    picture->pict_type = 0;
-    printf("[debug] got video pic, type:%d, pts:%"PRId64" \n", picture->pict_type, picture->pts);
- 
+    }
 
     return 0;
 }
@@ -188,6 +188,7 @@ int jietu(char * src, int jietime, char * dest_path)
     int got_encode_frame = 0;
 
     AVPacket pkt; 
+    int not_get_decode_frame = 0;
 
     if(src == NULL || dest_path == NULL){
         printf("[error]: jietu input params NULL.\n");
@@ -330,7 +331,7 @@ int jietu(char * src, int jietime, char * dest_path)
     }
     printf("[debug] video_should_interval=%d, jietime_by_timebase=%d\n", video_should_interval,jietime_by_timebase);
 
-
+    not_get_decode_frame = 0;
     // get the frame
     while(1){
         av_init_packet(&pkt);
@@ -350,13 +351,20 @@ int jietu(char * src, int jietime, char * dest_path)
             // decode the video frame
             ret = decode_video_packet(inctx->streams[input_video_stream_index]->codec, &pkt, &picture, &got_frame);
             if(ret < 0 || got_frame==0){
-                printf("[error] decode video packet error.\n");
-                return -1;
+                printf("[debug] decode video , bug not get frame.\n");
+                //return -1;
+                not_get_decode_frame += 1;
+                if(not_get_decode_frame > 10){
+                    printf("[error] long times for not_get_decode_frame:%d\n", not_get_decode_frame);
+                    return -1;
+                }
+                continue;
             }
 
             // if framerate=25, dts should: 1:0, 2:40, 3:80, 4:120
-            if(jietime_by_timebase >= pkt.dts && jietime_by_timebase < (pkt.dts+video_should_interval)){
-                printf("[debug] get the jietu frame, pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
+            if(jietime_by_timebase >= (pkt.dts - video_should_interval*not_get_decode_frame)
+                && jietime_by_timebase < (pkt.dts + video_should_interval - video_should_interval*not_get_decode_frame)){
+                printf("[debug] get the jietu frame, picture pts: %lld\n", (pkt.dts - video_should_interval*not_get_decode_frame));
                 // encode the picture
                 av_init_packet(&pkt);
                 ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, &picture, &got_encode_frame);
