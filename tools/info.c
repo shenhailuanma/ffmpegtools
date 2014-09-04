@@ -776,7 +776,6 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
             }
         }else if(pkt.stream_index == input_audio_stream_index){
             printf("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
-            continue;
 
             if(frist_audio_packet_dts == 0){
                 frist_audio_packet_dts = pkt.dts;
