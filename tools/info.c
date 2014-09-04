@@ -444,7 +444,9 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
     AVFormatContext * outctx = NULL;
     AVOutputFormat  * fmt = NULL;  // output format
     AVStream        * video_st = NULL;    // output stream
+    AVStream        * audio_st = NULL;    // output stream
     AVCodecContext  * outVideoCodecCtx = NULL;
+    AVCodecContext  * outAudioCodecCtx = NULL;
     AVCodec * outViedeCodec = NULL;
     int got_encode_frame = 0;
 
@@ -565,31 +567,19 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
         return -1;
     }
 
-    video_st = av_new_stream(outctx, outctx->nb_streams);
-    if (video_st==NULL){
-        printf("[error] av_new_stream error.\n");
-        return -1;
-    }
 
-    avcodec_get_context_defaults3(video_st->codec, NULL);
-    outVideoCodecCtx = video_st->codec;
-    outVideoCodecCtx->codec_id = fmt->video_codec;
-    outVideoCodecCtx->codec_type = AVMEDIA_TYPE_VIDEO;
-    outVideoCodecCtx->pix_fmt = PIX_FMT_YUVJ420P;
-
-    outVideoCodecCtx->width  = inWidth;  // out width same as input width
-    outVideoCodecCtx->height = inHeight; // out height same as input height
-
-    outVideoCodecCtx->time_base.num = 1;  
-    outVideoCodecCtx->time_base.den = 25;   
-
-
-
-    AVStream *video_stream;
-    AVStream *audio_stream;
 
     int video_extra_size;
+    int audio_extra_size;
 
+    // add video stream
+    if(input_video_stream_index != -1){
+        video_st = av_new_stream(outctx, outctx->nb_streams);
+        if (video_st==NULL){
+            printf("[error] av_new_stream error.\n");
+            return -1;
+        }
+    }
     //AVMetadataTag *t = NULL;
     //while ((t = av_metadata_get(ctx->metadata, "", t, AV_METADATA_IGNORE_SUFFIX)))
     //    av_metadata_set2(&outctx->metadata, t->key, t->value, AV_METADATA_DONT_OVERWRITE);
@@ -633,6 +623,47 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
         outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
     }
 
+    // add audio stream
+    if(input_audio_stream_index != -1){
+        audio_st = av_new_stream(outctx, outctx->nb_streams);
+        if (audio_st==NULL){
+            printf("[error] av_new_stream error.\n");
+            return -1;
+        }
+    }
+    //AVMetadataTag *t = NULL;
+    //while ((t = av_metadata_get(ctx->metadata, "", t, AV_METADATA_IGNORE_SUFFIX)))
+    //    av_metadata_set2(&outctx->metadata, t->key, t->value, AV_METADATA_DONT_OVERWRITE);
+
+    if(audio_st != NULL){
+
+        audio_st->time_base = inctx->streams[input_audio_stream_index]->time_base;
+        avcodec_get_context_defaults3(audio_st->codec, NULL);
+        outAudioCodecCtx = audio_st->codec;
+
+        outAudioCodecCtx->codec_id = inctx->streams[input_audio_stream_index]->codec->codec_id;
+        outAudioCodecCtx->codec_type = inctx->streams[input_audio_stream_index]->codec->codec_type;
+
+        outAudioCodecCtx->bit_rate = inctx->streams[input_audio_stream_index]->codec->bit_rate;
+        outAudioCodecCtx->bit_rate_tolerance = inctx->streams[input_audio_stream_index]->codec->bit_rate_tolerance;
+
+        outAudioCodecCtx->rc_buffer_size = inctx->streams[input_audio_stream_index]->codec->rc_buffer_size;
+        //outAudioCodecCtx->pix_fmt = inctx->streams[input_audio_stream_index]->codec->pix_fmt;
+        outAudioCodecCtx->time_base = inctx->streams[input_audio_stream_index]->codec->time_base;  
+
+        outAudioCodecCtx->sample_fmt = inctx->streams[input_audio_stream_index]->codec->sample_fmt; 
+        outAudioCodecCtx->sample_rate = inctx->streams[input_audio_stream_index]->codec->sample_rate; 
+        outAudioCodecCtx->channels = inctx->streams[input_audio_stream_index]->codec->channels; 
+
+
+        if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
+            outAudioCodecCtx->flags |= CODEC_FLAG_GLOBAL_HEADER;
+
+        audio_extra_size = inctx->streams[input_audio_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
+        outAudioCodecCtx->extradata = av_mallocz(audio_extra_size);
+        memcpy(outAudioCodecCtx->extradata, inctx->streams[input_audio_stream_index]->codec->extradata, inctx->streams[input_audio_stream_index]->codec->extradata_size);
+        outAudioCodecCtx->extradata_size = inctx->streams[input_audio_stream_index]->codec->extradata_size;
+    }
     av_dump_format(outctx, 0, dest_path, 1);  
 
     /*
