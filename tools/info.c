@@ -694,7 +694,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
         }
 
         if(pkt.stream_index == input_video_stream_index){
-            printf("[debug] pkt dts: %lld ,pts: %lld, id_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
+            printf("[debug] video pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
             /*
             // decode the video frame
             ret = decode_video_packet(inctx->streams[input_video_stream_index]->codec, &pkt, &picture, &got_frame);
@@ -731,6 +731,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
                 pkt.stream_index = input_video_stream_index;
                 pkt.dts = pkt.dts - frist_video_packet_dts;
                 pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
+                printf("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
                 ret = av_interleaved_write_frame(outctx, &pkt);
                 if (ret < 0) {
                     printf("[error] Could not write frame of stream: %d\n", ret);
@@ -742,6 +743,8 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
                 break;
             }
         }else if(pkt.stream_index == input_audio_stream_index){
+            printf("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
+
             if(frist_audio_packet_dts == 0){
                 frist_audio_packet_dts = pkt.dts;
             }
@@ -749,6 +752,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
             pkt.stream_index = input_audio_stream_index;
             pkt.dts = pkt.dts - frist_audio_packet_dts;
             pkt.pts = pkt.pts - frist_audio_packet_dts + 2*video_should_interval;
+            printf("[debug] audio pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
             ret = av_interleaved_write_frame(outctx, &pkt);
             if (ret < 0) {
                 printf("[error] Could not write frame of stream: %d\n", ret);
