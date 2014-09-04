@@ -178,6 +178,8 @@ int jietu(char * src, int jietime, char * dest_path)
     int input_video_stream_timebase_num  = 0;
     int input_video_stream_timebase_den  = 0;
     int input_video_ticks_per_frame = 1;
+    int input_fps_num = 1;
+    int input_fps_den = 1;
     int jietime_by_timebase;
     AVFrame picture;
     int got_frame = 0;
@@ -243,6 +245,12 @@ int jietu(char * src, int jietime, char * dest_path)
                 return -1;
             }
             jietime_by_timebase = (jietime*input_video_stream_timebase_den/input_video_stream_timebase_num)/1000;
+
+            // get fps
+            input_fps_den = inctx->streams[i]->r_frame_rate.den;
+            input_fps_num = inctx->streams[i]->r_frame_rate.num;
+
+            printf("[debug] input video fps %d/%d\n", input_fps_num, input_fps_den);
             break;
         }
     }
@@ -329,7 +337,8 @@ int jietu(char * src, int jietime, char * dest_path)
     // get the input stream video should interval, interval=timebase/framerate, e.g. 1000/25=40ms
     int video_should_interval = 40;
     if(input_video_timebase_den > 0 && input_video_stream_timebase_den > 0 && input_video_timebase_num > 0 && input_video_stream_timebase_num > 0 && input_video_ticks_per_frame > 0){
-        video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num)/(input_video_timebase_den/(input_video_timebase_num*input_video_ticks_per_frame));
+        //video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num)/(input_video_timebase_den/(input_video_timebase_num*input_video_ticks_per_frame));
+        video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num) / (input_fps_den/input_fps_num);
     }
     printf("[debug] video_should_interval=%d, jietime_by_timebase=%d\n", video_should_interval,jietime_by_timebase);
 
