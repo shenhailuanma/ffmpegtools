@@ -715,7 +715,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
             }
             // break until dts >= endtime
             if(pkt.dts < jietime_by_timebase){
-                printf("[debug] get the jietu frame, picture pts: %lld\n", (pkt.dts - video_should_interval*not_get_decode_frame));
+                //printf("[debug] get the jietu frame, picture pts: %lld\n", (pkt.dts - video_should_interval*not_get_decode_frame));
                 /*
                 // encode the picture
                 av_init_packet(&pkt);
@@ -746,7 +746,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
         }else if(pkt.stream_index == input_audio_stream_index){
             printf("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
             continue;
-            
+
             if(frist_audio_packet_dts == 0){
                 frist_audio_packet_dts = pkt.dts;
             }
@@ -785,7 +785,7 @@ int main(int argc, char ** argv)
     //ret = jietu("/home/tvie/lbld_720p_v3min.mp4", 40*34, "/tmp/jietu.jpg");
     //printf("jietu:%d.\n",ret);
 
-    ret = jieshipin("/home/tvie/lbld_720p_v3min.mp4", 30000, (180-30)*1000, "/tmp/jieshipin.mp4");
+    ret = jieshipin("/tmp/shouji1.mp4", 100, 8000, "/tmp/jieshipin.mp4");
     printf("jieshipin: %d\n", ret);
 
     return 0;
