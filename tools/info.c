@@ -138,6 +138,7 @@ static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame
         printf("[error] no picture gotten.\n");
         return -1;
     }else{
+        *got_frame = 1;
         picture->pts = pts;
         picture->pict_type = 0;
         printf("[debug] got video pic, type:%d, pts:%"PRId64" \n", picture->pict_type, picture->pts);
@@ -335,6 +336,8 @@ int jietu(char * src, int jietime, char * dest_path)
     // get the frame
     while(1){
         av_init_packet(&pkt);
+        pkt.data = NULL;
+        pkt.size = 0;
         ret = av_read_frame(inctx, &pkt);
         if(ret == AVERROR(EAGAIN)){
             // EAGAIN means try again
@@ -361,12 +364,15 @@ int jietu(char * src, int jietime, char * dest_path)
                 continue;
             }
 
+
             // if framerate=25, dts should: 1:0, 2:40, 3:80, 4:120
             if(jietime_by_timebase >= (pkt.dts - video_should_interval*not_get_decode_frame)
                 && jietime_by_timebase < (pkt.dts + video_should_interval - video_should_interval*not_get_decode_frame)){
                 printf("[debug] get the jietu frame, picture pts: %lld\n", (pkt.dts - video_should_interval*not_get_decode_frame));
                 // encode the picture
                 av_init_packet(&pkt);
+                pkt.data = NULL;
+                pkt.size = 0;
                 ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, &picture, &got_encode_frame);
                 if(ret < 0 || got_encode_frame==0){
                     printf("[error] encode picture error.\n");
