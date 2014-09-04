@@ -650,12 +650,13 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
             return -1;
         }
     }
+    */
 
     if(avformat_write_header(outctx, NULL)){
         printf("[error] outctx av_write_header error!\n");
         return -1;
     }
-    */
+    
 
     // seek the jietu time, AV_TIME_BASE=1000000 
     ret = av_seek_frame(inctx, -1, starttime*1000, AVSEEK_FLAG_BACKWARD);
@@ -744,7 +745,8 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
             }
         }else if(pkt.stream_index == input_audio_stream_index){
             printf("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
-
+            continue;
+            
             if(frist_audio_packet_dts == 0){
                 frist_audio_packet_dts = pkt.dts;
             }
