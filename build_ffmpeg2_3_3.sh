@@ -21,7 +21,7 @@ pushd ffmpeg-2.3.3
   --disable-debug \
   --enable-nonfree \
   --enable-version3 \
-  --disable-yasm  
+  --disable-yasm  \
   --disable-decoders \
   --disable-parsers \
   --disable-encoders \
