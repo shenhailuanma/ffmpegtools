@@ -22,25 +22,25 @@ pushd ffmpeg-2.3.3
   --enable-nonfree \
   --enable-version3 \
   --disable-yasm  
-#  --disable-decoders \
-#  --disable-parsers \
-#  --disable-encoders \
-#  --enable-decoder=h264 \
-#  --enable-decoder=aac \
-#  --enable-decoder=ac3 \
-#  --enable-decoder=ape \
-#  --enable-decoder=mp3 \
-#  --enable-decoder=mpeg2video \
-#  --enable-decoder=pcm_s16be \
-#  --enable-decoder=pcm_s16le \
-#  --enable-decoder=pcm_s32be \
-#  --enable-decoder=pcm_s32le \
-#  --enable-decoder=flac \
-#  --enable-decoder=flv \
-#  --enable-decoder=zlib \
-#  --enable-decoder=h264 \
-#  --enable-decoder=flv \
-#  --enable-encoder=mp3
+  --disable-decoders \
+  --disable-parsers \
+  --disable-encoders \
+  --enable-decoder=h264 \
+  --enable-decoder=aac \
+  --enable-decoder=ac3 \
+  --enable-decoder=ape \
+  --enable-decoder=mp3 \
+  --enable-decoder=mpeg2video \
+  --enable-decoder=pcm_s16be \
+  --enable-decoder=pcm_s16le \
+  --enable-decoder=pcm_s32be \
+  --enable-decoder=pcm_s32le \
+  --enable-decoder=flac \
+  --enable-decoder=flv \
+  --enable-decoder=zlib \
+  --enable-decoder=h264 \
+  --enable-decoder=flv \
+  --enable-encoder=mjpeg
 
 
 make clean
