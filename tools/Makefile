@@ -12,6 +12,7 @@ InfoOBJECTS := $(patsubst %.c, %.o, $(InfoSource))
 
 BUILD_ARCH = $(shell uname -m)
 
+
 .PHONY: all
 
 all: info 
