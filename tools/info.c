@@ -305,6 +305,13 @@ int jietu(char * src, int jietime, char * dest_path)
     outVideoCodecCtx->time_base.num = 1;  
     outVideoCodecCtx->time_base.den = 25;   
 
+    AVDictionaryEntry *t = NULL;
+    while ((t = av_dict_get(inctx->streams[input_video_stream_index]->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
+        //printf("metadata: %s=%s.\n", t->key, t->value);
+        av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
+    }
+
+
     av_dump_format(outctx, 0, dest_path, 1);  
 
     // open the output encoder
@@ -632,7 +639,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
             av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
         }
 
-        
+         
     }
 
     // add audio stream
