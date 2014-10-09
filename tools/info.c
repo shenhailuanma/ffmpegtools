@@ -583,6 +583,11 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
     //AVMetadataTag *t = NULL;
     //while ((t = av_metadata_get(ctx->metadata, "", t, AV_METADATA_IGNORE_SUFFIX)))
     //    av_metadata_set2(&outctx->metadata, t->key, t->value, AV_METADATA_DONT_OVERWRITE);
+    AVDictionaryEntry *t = NULL;
+    while ((t = av_dict_get(inctx->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
+        //printf("metadata: %s=%s.\n", t->key, t->value);
+        av_dict_set(&outctx->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
+    }
 
     if(video_st != NULL){
 
@@ -621,6 +626,13 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
         outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
         memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
         outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
+
+        while ((t = av_dict_get(inctx->streams[input_video_stream_index]->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
+            //printf("stream metadata: %s=%s.\n", t->key, t->value);
+            av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
+        }
+
+        
     }
 
     // add audio stream
