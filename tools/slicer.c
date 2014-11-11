@@ -84,7 +84,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
     AVOutputFormat  * fmt = NULL;  // output format
     AVStream        * video_st = NULL;    // output stream
     AVStream        * audio_st = NULL;    // output stream
-    AVCodecContext  * outVideoCodecCtx = NULL;
+    AVCodecContext  * outVideoCodecCtx = NULL;  // video encode codec ctx
     AVCodecContext  * outAudioCodecCtx = NULL;
     AVCodec * outViedeCodec = NULL;
     int got_encode_frame = 0;
@@ -177,9 +177,12 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
         return -1;
     }else{
         // open it 
+        printf("[debug] open video decodec codec, id:%d, name:%s\n",inctx->streams[input_video_stream_index]->codec->codec_id, 
+            inViedeCodec->name);
+        
         ret = avcodec_open2(inctx->streams[input_video_stream_index]->codec, inViedeCodec, NULL);
         if (ret < 0) {
-            printf("[error] could not open codec\n");
+            printf("[error] could not open video decode codec\n");
             return -1;
         }
     }
@@ -252,24 +255,43 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
         outVideoCodecCtx->time_base = inctx->streams[input_video_stream_index]->codec->time_base;  
 
         outVideoCodecCtx->width = inctx->streams[input_video_stream_index]->codec->width;
-       // outVideoCodecCtx->width = 640;
         outVideoCodecCtx->height = inctx->streams[input_video_stream_index]->codec->height;
-       // outVideoCodecCtx->height = 480;
-        outVideoCodecCtx->has_b_frames = inctx->streams[input_video_stream_index]->codec->has_b_frames;
         printf("width:%d, height:%d\n", outVideoCodecCtx->width, outVideoCodecCtx->height);
+
+        outVideoCodecCtx->has_b_frames = inctx->streams[input_video_stream_index]->codec->has_b_frames;
+        
+        outVideoCodecCtx->me_range  = inctx->streams[input_video_stream_index]->codec->me_range;
+        if(outVideoCodecCtx->me_range == 0){
+            outVideoCodecCtx->me_range = 16;
+        }
+        printf("me_range:%d\n", outVideoCodecCtx->me_range);
+        
+        
+        outVideoCodecCtx->max_qdiff = inctx->streams[input_video_stream_index]->codec->max_qdiff;
+        printf("max_qdiff:%d\n", outVideoCodecCtx->max_qdiff);
+        
+        outVideoCodecCtx->qmin      = inctx->streams[input_video_stream_index]->codec->qmin;
+        printf("qmin:%d\n", outVideoCodecCtx->qmin);
+        outVideoCodecCtx->qmax      = inctx->streams[input_video_stream_index]->codec->qmax;
+        printf("qmax:%d\n", outVideoCodecCtx->qmax);
+        
+        //outVideoCodecCtx->qcompress = inctx->streams[input_video_stream_index]->codec->qcompress;
+        outVideoCodecCtx->qcompress = 0.6;
+        printf("qcompress:%f\n", outVideoCodecCtx->qcompress);
+        
         
         if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
             outVideoCodecCtx->flags |= CODEC_FLAG_GLOBAL_HEADER;
 
-        video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
-        outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
-        memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
-        outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
+        //video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
+        //outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
+        //memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
+        //outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
 
-        while ((t = av_dict_get(inctx->streams[input_video_stream_index]->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
+        //while ((t = av_dict_get(inctx->streams[input_video_stream_index]->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
             //printf("stream metadata: %s=%s.\n", t->key, t->value);
-            av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
-        }
+         //   av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
+        //}
 
          
     }
@@ -315,7 +337,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
         memcpy(outAudioCodecCtx->extradata, inctx->streams[input_audio_stream_index]->codec->extradata, inctx->streams[input_audio_stream_index]->codec->extradata_size);
         outAudioCodecCtx->extradata_size = inctx->streams[input_audio_stream_index]->codec->extradata_size;
     }
-    av_dump_format(outctx, 0, dest_path, 1);  
+     
 
     
     //// fix me: encode video is too slow, not use yet
@@ -326,13 +348,16 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
         return -1;
     }else{
         // open it 
+        printf("[debug] open video encodec codec, id:%d, name:%s\n",outVideoCodecCtx->codec_id, outViedeCodec->name);
+
         ret = avcodec_open2(outVideoCodecCtx, outViedeCodec, NULL);
         if (ret < 0) {
-            printf("[error] could not open codec\n");
+            printf("[error] could not open video encode codec\n");
             return -1;
         }
     }
     
+    av_dump_format(outctx, 0, dest_path, 1); 
 
     if(avformat_write_header(outctx, NULL)){
         printf("[error] outctx av_write_header error!\n");
@@ -404,28 +429,32 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
                 pkt.data = NULL;
                 pkt.size = 0;
                 ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, &picture, &got_encode_frame);
-                if(ret < 0 || got_encode_frame==0){
-                    printf("[error] encode picture error.\n");
+                //if(ret < 0 || got_encode_frame ==0 ){
+                if(ret < 0){
+                    printf("[error] encode picture error. return:%d\n", ret);
                     return -1;
                 }
                 
-
-                // write the pkt to stream
-                pkt.stream_index = input_video_stream_index;
-                pkt.dts = pkt.dts - frist_video_packet_dts;
-                pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
-                printf("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
-                ret = av_interleaved_write_frame(outctx, &pkt);
-                if (ret < 0) {
-                    printf("[error] Could not write frame of stream: %d\n", ret);
-                    return -1;
+                if(got_encode_frame){
+                    // write the pkt to stream
+                    pkt.stream_index = input_video_stream_index;
+                    pkt.dts = pkt.dts - frist_video_packet_dts;
+                    pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
+                    printf("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
+                    ret = av_interleaved_write_frame(outctx, &pkt);
+                    if (ret < 0) {
+                        printf("[error] Could not write frame of stream: %d\n", ret);
+                        return -1;
+                    }
                 }
                 //av_write_trailer(outctx);
             }else{
                 printf("[debug] at the end time, stop.\n");
                 break;
             }
-        }else if(pkt.stream_index == input_audio_stream_index){
+        }
+        else if(pkt.stream_index == input_audio_stream_index){
+            continue;
             printf("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
 
             if(frist_audio_packet_dts == 0){
