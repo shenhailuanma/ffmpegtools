@@ -685,7 +685,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
     }
     av_dump_format(outctx, 0, dest_path, 1);  
 
-    /*
+    
     //// fix me: encode video is too slow, not use yet
     // open the output encoder
     outViedeCodec = avcodec_find_encoder(outVideoCodecCtx->codec_id);
@@ -700,7 +700,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
             return -1;
         }
     }
-    */
+    
 
     if(avformat_write_header(outctx, NULL)){
         printf("[error] outctx av_write_header error!\n");
@@ -746,7 +746,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
 
         if(pkt.stream_index == input_video_stream_index){
             printf("[debug] video pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
-            /*
+            
             // decode the video frame
             ret = decode_video_packet(inctx->streams[input_video_stream_index]->codec, &pkt, &picture, &got_frame);
             if(ret < 0 || got_frame==0){
@@ -759,7 +759,7 @@ int jieshipin(char * src, int starttime, int endtime, char * dest_path)
                 }
                 continue;
             }
-            */
+            
             if(frist_video_packet_dts == 0){
                 frist_video_packet_dts = pkt.dts;
             }
