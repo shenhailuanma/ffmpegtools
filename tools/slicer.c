@@ -452,9 +452,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
                 printf("[debug] at the end time, stop.\n");
                 break;
             }
-        }
-        else if(pkt.stream_index == input_audio_stream_index){
-            continue;
+        }else if(pkt.stream_index == input_audio_stream_index){
             printf("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
 
             if(frist_audio_packet_dts == 0){
