@@ -8,6 +8,43 @@
 #include "libavcodec/avcodec.h"
 
 
+static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame * picture, int * got_frame)
+{
+    printf("[debug] decode video pkt.\n");
+    avcodec_get_frame_defaults(picture);
+
+
+    int got_picture;
+
+    *got_frame = 0;
+
+    int ret = avcodec_decode_video2(ctx, picture, &got_picture, packet);
+    if (ret < 0) {
+        printf("[error] video frame decode error for pkt: %"PRId64" \n", packet->pts);
+        return -1;
+    }
+
+    int64_t pts = 0;
+    //if (picture->opaque && *(int64_t*) picture->opaque != AV_NOPTS_VALUE) {
+     //   pts = *(int64_t *) picture->opaque;
+    //}
+
+    if(!got_picture){
+        printf("[error] no picture gotten.\n");
+        return -1;
+    }else{
+        *got_frame = 1;
+        picture->pts = pts;
+        picture->pict_type = 0;
+        printf("[debug] got video pic, type:%d, pts:%"PRId64" \n", picture->pict_type, picture->pts);
+
+    }
+
+    return 0;
+}
+
+
+
 /*
     Function: slicer
     Input:  
