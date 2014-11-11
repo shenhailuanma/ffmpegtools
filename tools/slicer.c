@@ -10,7 +10,7 @@
 
 static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame * picture, int * got_frame)
 {
-    printf("[debug] decode video pkt.\n");
+    //printf("[debug] decode video pkt.\n");
     avcodec_get_frame_defaults(picture);
 
 
@@ -25,18 +25,20 @@ static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame
     }
 
     int64_t pts = 0;
-    //if (picture->opaque && *(int64_t*) picture->opaque != AV_NOPTS_VALUE) {
-     //   pts = *(int64_t *) picture->opaque;
-    //}
+    if (picture->opaque && *(int64_t*) picture->opaque != AV_NOPTS_VALUE) {
+        pts = *(int64_t *) picture->opaque;
+    }
 
     if(!got_picture){
         printf("[error] no picture gotten.\n");
         return -1;
     }else{
         *got_frame = 1;
-        picture->pts = pts;
+        //picture->pts = pts;
+        picture->pts = picture->pkt_pts;
         picture->pict_type = 0;
-        printf("[debug] got video pic, type:%d, pts:%"PRId64" \n", picture->pict_type, picture->pts);
+        printf("[debug] got video pic, type:%d, pts:%"PRId64", pkt_pts:%"PRId64", pkt_dts:%"PRId64". \n", 
+            picture->pict_type, picture->pts, picture->pkt_pts, picture->pkt_dts);
 
     }
 
@@ -76,6 +78,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
     int input_video_ticks_per_frame = 1;
     int input_fps_num = 1;
     int input_fps_den = 1;
+    int starttime_by_timebase;    // end time in video timebase
     int jietime_by_timebase;    // end time in video timebase
     AVFrame picture;
     int got_frame = 0;
@@ -148,6 +151,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
                 return -1;
             }
             jietime_by_timebase = (endtime*input_video_stream_timebase_den/input_video_stream_timebase_num)/1000;
+            starttime_by_timebase = (starttime*input_video_stream_timebase_den/input_video_stream_timebase_num)/1000;
 
             // get fps
             input_fps_den = inctx->streams[i]->r_frame_rate.den;
@@ -416,12 +420,23 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
                 }
                 continue;
             }
-            
-            if(frist_video_packet_dts == 0){
-                frist_video_packet_dts = pkt.dts;
+
+            printf("[debug] decode video , picture pts=%d.\n", picture.pts);
+
+            // start when time reach
+            if(picture.pts < starttime_by_timebase){
+                printf("[debug] time not ok , now picture pts=%d, start time:%d.\n", picture.pts, starttime_by_timebase);
+                continue;
             }
+
+            // save the first frame pts
+            if(frist_video_packet_dts == 0){
+                frist_video_packet_dts = picture.pts;
+            }
+
+            
             // break until dts >= endtime
-            if(pkt.dts < jietime_by_timebase){
+            if(picture.pts < jietime_by_timebase){
                 //printf("[debug] get the jietu frame, picture pts: %lld\n", (pkt.dts - video_should_interval*not_get_decode_frame));
                 
                 // encode the picture
@@ -452,7 +467,9 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
                 printf("[debug] at the end time, stop.\n");
                 break;
             }
-        }else if(pkt.stream_index == input_audio_stream_index){
+        }
+        else if(pkt.stream_index == input_audio_stream_index){
+            continue;
             printf("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
 
             if(frist_audio_packet_dts == 0){
