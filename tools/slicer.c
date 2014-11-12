@@ -8,6 +8,118 @@
 #include "libavcodec/avcodec.h"
 
 
+
+static void print_hex(char * phex, int size)
+{
+    if(phex == NULL)
+        return;
+
+    while(size>0){
+        printf("%x ", phex[size]);
+        size--;
+    }
+
+    printf("\n");
+}
+
+
+static int reset_video_codec(AVFormatContext * inctx, AVCodecContext * ctx, int input_video_stream_index){
+
+
+    AVDictionaryEntry *t = NULL;
+    
+    avcodec_get_context_defaults3(ctx, NULL);
+
+    ctx->codec_id = inctx->streams[input_video_stream_index]->codec->codec_id;
+    ctx->codec_type = inctx->streams[input_video_stream_index]->codec->codec_type;
+    /*
+    (!outVideoCodecCtx->codec_tag){
+            if( !outctx->oformat->codec_tag
+               || av_codec_get_id (outctx->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_tag) == outVideoCodecCtx->codec_id
+               || av_codec_get_tag(outctx->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_id) <= 0)
+                outVideoCodecCtx->codec_tag = inctx->streams[i]->codec->codec_tag;
+    }
+    */
+    ctx->bit_rate = inctx->streams[input_video_stream_index]->codec->bit_rate;
+    ctx->bit_rate_tolerance = inctx->streams[input_video_stream_index]->codec->bit_rate_tolerance;
+    
+    ctx->rc_buffer_size = inctx->streams[input_video_stream_index]->codec->rc_buffer_size;
+    ctx->pix_fmt = inctx->streams[input_video_stream_index]->codec->pix_fmt;
+    ctx->time_base = inctx->streams[input_video_stream_index]->codec->time_base;  
+    
+    ctx->width = inctx->streams[input_video_stream_index]->codec->width;
+    ctx->height = inctx->streams[input_video_stream_index]->codec->height;
+    printf("width:%d, height:%d\n", ctx->width, ctx->height);
+    
+    ctx->has_b_frames = inctx->streams[input_video_stream_index]->codec->has_b_frames;
+    
+    ctx->me_range  = inctx->streams[input_video_stream_index]->codec->me_range;
+    if(ctx->me_range == 0){
+        ctx->me_range = 16;
+    }
+    printf("me_range:%d\n", ctx->me_range);
+    
+    
+    ctx->max_qdiff = inctx->streams[input_video_stream_index]->codec->max_qdiff;
+    printf("max_qdiff:%d\n", ctx->max_qdiff);
+    
+    ctx->qmin      = inctx->streams[input_video_stream_index]->codec->qmin;
+    printf("qmin:%d\n", ctx->qmin);
+    ctx->qmax      = inctx->streams[input_video_stream_index]->codec->qmax;
+    printf("qmax:%d\n", ctx->qmax);
+    
+    //outVideoCodecCtx->qcompress = inctx->streams[input_video_stream_index]->codec->qcompress;
+    ctx->qcompress = 0.6;
+    printf("qcompress:%f\n", ctx->qcompress);
+    
+    
+    //if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
+        ctx->flags |= CODEC_FLAG_GLOBAL_HEADER;
+    
+    //printf("[debug] enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
+    //print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
+    
+    //video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
+    //outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
+    //memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
+    //outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
+    
+    //printf("[debug] enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
+    //print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
+    
+    
+    //while ((t = av_dict_get(inctx->streams[input_video_stream_index]->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
+     //   printf("stream metadata: %s=%s.\n", t->key, t->value);
+    //    av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
+    //}
+
+
+    // open the codec
+    AVCodec * outViedeCodec = NULL;
+    int ret = 0;
+    int video_extra_size= 0;
+    char * video_extradata = NULL;
+    
+    
+    outViedeCodec = avcodec_find_encoder(ctx->codec_id);
+    if(outViedeCodec == NULL){
+        printf("[error] outViedeCodec %d not found !\n", ctx->codec_id);
+        return -1;
+    }else{
+        // open it 
+        printf("[debug] open video encodec codec, id:%d, name:%s\n",ctx->codec_id, outViedeCodec->name);
+
+        ret = avcodec_open2(ctx, outViedeCodec, NULL);
+        if (ret < 0) {
+            printf("[error] could not open video encode codec\n");
+            return -1;
+        }
+  
+    }
+    
+
+}
+
 static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame * picture, int * got_frame)
 {
     //printf("[debug] decode video pkt.\n");
@@ -99,6 +211,8 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
     int have_found_start_frame = 0;
     int have_found_end_frame = 0;
     int stream_gop_cnt = 0;
+    int reset_stream_ctx_before_copy = 0;
+    int reset_stream_ctx_before_end  = 0;
 
     if(src == NULL || dest_path == NULL){
         printf("[error]: jietu input params NULL.\n");
@@ -219,6 +333,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
 
 
     int video_extra_size;
+    char * video_extradata = NULL;
     int audio_extra_size;
 
     // add video stream
@@ -290,15 +405,22 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
         if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
             outVideoCodecCtx->flags |= CODEC_FLAG_GLOBAL_HEADER;
 
+        //printf("[debug] enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
+        //print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
+
         //video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
         //outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
         //memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
         //outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
 
-        //while ((t = av_dict_get(inctx->streams[input_video_stream_index]->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
-            //printf("stream metadata: %s=%s.\n", t->key, t->value);
-         //   av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
-        //}
+        //printf("[debug] enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
+        //print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
+        
+
+        while ((t = av_dict_get(inctx->streams[input_video_stream_index]->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
+            printf("stream metadata: %s=%s.\n", t->key, t->value);
+            av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
+        }
 
          
     }
@@ -362,6 +484,40 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
             printf("[error] could not open video encode codec\n");
             return -1;
         }
+
+        printf("[debug] after open, enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
+        print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
+
+
+        AVIOContext *pb = NULL;
+        char *buf = NULL;
+        int size = 0;
+        
+        ret = avio_open_dyn_buf(&pb);
+        if (ret < 0)
+            return ret;
+        
+        ff_isom_write_avcc(pb, outVideoCodecCtx->extradata, outVideoCodecCtx->extradata_size);
+        size = avio_close_dyn_buf(pb, &buf);
+        
+        //video_extra_size = outVideoCodecCtx->extradata_size + inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
+        //video_extradata  = av_mallocz(video_extra_size);
+        //memcpy(video_extradata, outVideoCodecCtx->extradata, outVideoCodecCtx->extradata_size);
+        //memcpy(video_extradata+outVideoCodecCtx->extradata_size, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
+
+        video_extra_size = size + inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
+        video_extradata  = av_mallocz(video_extra_size);
+
+        memcpy(video_extradata, buf, size);
+        memcpy(video_extradata+size, outVideoCodecCtx->extradata, outVideoCodecCtx->extradata_size);
+
+
+        outVideoCodecCtx->extradata_size = size + inctx->streams[input_video_stream_index]->codec->extradata_size;
+        outVideoCodecCtx->extradata = video_extradata;
+        printf("[debug] after open rebuild, enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
+        print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
+
+        
     }
     
     av_dump_format(outctx, 0, dest_path, 1); 
@@ -428,12 +584,13 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
                 if(pkt.flags & AV_PKT_FLAG_KEY){
                     stream_gop_cnt += 1;
                 }
-                    
-            
             }
 
             // if the start frame not the Key frame, transcode the stream from start frame to the next GOP. 
             if(!have_found_start_frame && stream_gop_cnt <= 1){
+                //frist_video_packet_dts = pkt.dts;
+                //continue;
+
                 // decode the stream until find the start frame
                 
                 // decode the video frame
@@ -493,6 +650,31 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
                 }
             }
             else{
+                //break;
+                // reset the stream ctx
+                if(!reset_stream_ctx_before_copy && 0){
+                    //
+                    avcodec_close(outVideoCodecCtx);
+
+                    reset_video_codec(inctx, outVideoCodecCtx, input_video_stream_index);
+                    
+                    video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
+                    outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
+                    memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
+                    outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
+
+                    printf("[debug] after open rebuild, enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
+                    print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
+                    
+                    //av_dump_format(outctx, 0, dest_path, 1); 
+                    
+                    //if(avformat_write_header(outctx, NULL)){
+                    //    printf("[error] outctx av_write_header error!\n");
+                    //    return -1;
+                    //}
+
+                    reset_stream_ctx_before_copy = 1;
+                }
 
                 // copy the frames until end time
                 if(pkt.dts > jietime_by_timebase){
