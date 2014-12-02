@@ -16,15 +16,13 @@ NDK=/opt/android-ndk-r10
 SYSROOT=$NDK/platforms/android-9/arch-arm/
 TOOLCHAIN=$NDK/toolchains/arm-linux-androideabi-4.6/prebuilt/linux-x86
 
-
-
 # build the ffmpeg libs
 
 mkdir -p _build
 pushd _build
 
 tar xf ${FFMPEG_TAR}
-pushd ffmpeg-2.3.3 
+pushd ffmpeg-1.1 
 
 ./configure  \
   --cross-prefix=$TOOLCHAIN/bin/arm-linux-androideabi- --target-os=linux  --arch=arm  --enable-cross-compile \
