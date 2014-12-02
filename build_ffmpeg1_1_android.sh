@@ -13,8 +13,8 @@ FFMPEG_TAR=${PWD}/tarfiles/ffmpeg-1.1.tar.bz2
 
 # the NDK path
 NDK=/opt/android-ndk-r10
-SYSROOT=$NDK/platforms/android-9/arch-arm/
-TOOLCHAIN=$NDK/toolchains/arm-linux-androideabi-4.6/prebuilt/linux-x86
+SYSROOT=$NDK/platforms/android-19/arch-arm/
+TOOLCHAIN=$NDK/toolchains/arm-linux-androideabi-4.6/prebuilt/linux-x86_64
 
 # build the ffmpeg libs
 
