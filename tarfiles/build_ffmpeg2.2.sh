@@ -8,7 +8,7 @@ echo "start to build the tools for transcode system(current_dir: ${current_dir},
 
 mkdir -p ${build_dir}
 mkdir -p ${release_dir}
-cp -rf libaacplus-2.0.2.tar.gz 26410-800.zip faac-1.28.tar.bz2 lame-3.98.4.tar.gz opencore-amr-0.1.2.tar.gz x264-snapshot-20140803-2245.tar.bz2 ffmpeg-2.2.tar.gz ${build_dir}
+cp -rf yasm-1.2.0.tar.gz libaacplus-2.0.2.tar.gz 26410-800.zip faac-1.28.tar.bz2 lame-3.98.4.tar.gz opencore-amr-0.1.2.tar.gz x264-snapshot-20140803-2245.tar.bz2 ffmpeg-2.2.tar.gz ${build_dir}
 
 
 export PKG_CONFIG_PATH=${PKG_CONFIG_PATH}:${release_dir}/lib/pkgconfig
