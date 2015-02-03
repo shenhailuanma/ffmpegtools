@@ -8,6 +8,10 @@
 #include "libavcodec/avcodec.h"
 
 
+#define SLICER_MODE_ENCODE_ONLY       0
+#define SLICER_MODE_COPY_ONLY         1
+#define SLICER_MODE_ENCODE_COPY       2
+
 
 static void print_hex(char * phex, int size)
 {
@@ -166,12 +170,13 @@ static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame
         starttime: the start time of the stream which you want to get. unit is ms, e.g. 4000 means 4 s.
         endtime  : the end   time of the stream which you want to get. unit is ms, e.g. 4000 means 4 s.  
         dest_path: the dest file path
+        mode: slicer mode(0:encode, 1:copy, 2:encode and copy)
 
     Return:
         0 : means ok
         not 0 : means error
 */
-int slicer(char * src, int starttime, int endtime, char * dest_path)
+int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
 {
     int ret;
     int i;
@@ -568,31 +573,26 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
         }
 
 
-        
-
-        if(pkt.stream_index == input_video_stream_index){
-            printf("[debug] video pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
-
-            // if the frame is key frame and is the start frame, then start copy, else to decode the frames until get the start frame.
+        if (mode == SLICER_MODE_ENCODE_ONLY){
             
-            if(!have_found_start_frame){
-                if((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.pts >= starttime_by_timebase && pkt.pts < starttime_by_timebase)){
-                    have_found_start_frame = 1;
-                    frist_video_packet_dts = pkt.dts;
-                }
+            if(pkt.stream_index == input_video_stream_index){
+                // video
+                printf("[debug] video pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
 
-                if(pkt.flags & AV_PKT_FLAG_KEY){
-                    stream_gop_cnt += 1;
-                }
-            }
-
-            // if the start frame not the Key frame, transcode the stream from start frame to the next GOP. 
-            if(!have_found_start_frame && stream_gop_cnt <= 1){
-                //frist_video_packet_dts = pkt.dts;
-                //continue;
-
-                // decode the stream until find the start frame
+                // if the frame is key frame and is the start frame, then start copy, else to decode the frames until get the start frame.
                 
+                if(!have_found_start_frame){
+                    if((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.pts >= starttime_by_timebase && pkt.pts < starttime_by_timebase)){
+                        have_found_start_frame = 1;
+                        frist_video_packet_dts = pkt.dts;
+                    }
+
+                    if(pkt.flags & AV_PKT_FLAG_KEY){
+                        stream_gop_cnt += 1;
+                    }
+                }
+
+                    
                 // decode the video frame
                 ret = decode_video_packet(inctx->streams[input_video_stream_index]->codec, &pkt, &picture, &got_frame);
                 if(ret < 0 || got_frame==0){
@@ -610,116 +610,230 @@ int slicer(char * src, int starttime, int endtime, char * dest_path)
 
                 // start when time reach
                 if(picture.pts < starttime_by_timebase){
-                    printf("[debug] time not ok , now picture pts=%d, start time:%d.\n", picture.pts, starttime_by_timebase);
+                    //printf("[debug] time not ok , now picture pts=%d, start time:%d.\n", picture.pts, starttime_by_timebase);
                     continue;
+                }
+
+                if(picture.pts > jietime_by_timebase){
+                    printf("[debug] reach the end time,  endtime=%d\n", jietime_by_timebase);
+                    break;
                 }
 
                 // save the first frame pts
                 if(frist_video_packet_dts == 0){
                     frist_video_packet_dts = picture.pts;
                 }
-                
-                // break until next GOP
-                if(picture.pts < jietime_by_timebase){
-                    //printf("[debug] get the jietu frame, picture pts: %lld\n", (pkt.dts - video_should_interval*not_get_decode_frame));
                     
-                    // encode the picture
-                    av_init_packet(&pkt);
-                    pkt.data = NULL;
-                    pkt.size = 0;
-                    ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, &picture, &got_encode_frame);
-                    //if(ret < 0 || got_encode_frame ==0 ){
-                    if(ret < 0){
-                        printf("[error] encode picture error. return:%d\n", ret);
+
+                        
+                        
+                // encode the picture
+                av_init_packet(&pkt);
+                pkt.data = NULL;
+                pkt.size = 0;
+                ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, &picture, &got_encode_frame);
+                //if(ret < 0 || got_encode_frame ==0 ){
+                if(ret < 0){
+                    printf("[error] encode picture error. return:%d\n", ret);
+                    return -1;
+                }
+                
+                if(got_encode_frame){
+                    // write the pkt to stream
+                    pkt.stream_index = input_video_stream_index;
+                    pkt.dts = pkt.dts - frist_video_packet_dts;
+                    pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
+                    //printf("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
+                    ret = av_interleaved_write_frame(outctx, &pkt);
+                    if (ret < 0) {
+                        printf("[error] Could not write frame of stream: %d\n", ret);
                         return -1;
                     }
-                    
-                    if(got_encode_frame){
-                        // write the pkt to stream
-                        pkt.stream_index = input_video_stream_index;
-                        pkt.dts = pkt.dts - frist_video_packet_dts;
-                        pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
-                        printf("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
-                        ret = av_interleaved_write_frame(outctx, &pkt);
-                        if (ret < 0) {
-                            printf("[error] Could not write frame of stream: %d\n", ret);
-                            return -1;
-                        }
-                    }
-
-                }
-            }
-            else{
-                //break;
-                // reset the stream ctx
-                if(!reset_stream_ctx_before_copy && 0){
-                    //
-                    avcodec_close(outVideoCodecCtx);
-
-                    reset_video_codec(inctx, outVideoCodecCtx, input_video_stream_index);
-                    
-                    video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
-                    outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
-                    memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
-                    outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
-
-                    printf("[debug] after open rebuild, enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
-                    print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
-                    
-                    //av_dump_format(outctx, 0, dest_path, 1); 
-                    
-                    //if(avformat_write_header(outctx, NULL)){
-                    //    printf("[error] outctx av_write_header error!\n");
-                    //    return -1;
-                    //}
-
-                    reset_stream_ctx_before_copy = 1;
                 }
 
-                // copy the frames until end time
-                if(pkt.dts > jietime_by_timebase){
-                    printf("[debug] reach the end time, pkt.pts=%d, dts=%d, endtime=%d\n", pkt.pts, pkt.dts, jietime_by_timebase);
-                    break;
-                }
-                
-                // modify the pkt ts
-                pkt.stream_index = input_video_stream_index;
-                pkt.dts = pkt.dts - frist_video_packet_dts;
-                pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
-                printf("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
+            }else if((pkt.stream_index == input_audio_stream_index) && have_found_start_frame){
+                // audio
+                printf("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
 
-                
-                // write the frame 
+                if(frist_audio_packet_dts == 0){
+                    frist_audio_packet_dts = pkt.dts;
+                }
+                // if audio pkt , write
+                pkt.stream_index = input_audio_stream_index;
+                pkt.dts = pkt.dts - frist_audio_packet_dts;
+                pkt.pts = pkt.pts - frist_audio_packet_dts + 2*video_should_interval;
+                printf("[debug] audio pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
                 ret = av_interleaved_write_frame(outctx, &pkt);
                 if (ret < 0) {
                     printf("[error] Could not write frame of stream: %d\n", ret);
                     return -1;
-                }  
+                }
+            }
 
+
+        }else if (mode == SLICER_MODE_ENCODE_COPY){
+
+            if(pkt.stream_index == input_video_stream_index){
+                printf("[debug] video pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
+
+                // if the frame is key frame and is the start frame, then start copy, else to decode the frames until get the start frame.
+                
+                if(!have_found_start_frame){
+                    if((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.pts >= starttime_by_timebase && pkt.pts < starttime_by_timebase)){
+                        have_found_start_frame = 1;
+                        frist_video_packet_dts = pkt.dts;
+                    }
+
+                    if(pkt.flags & AV_PKT_FLAG_KEY){
+                        stream_gop_cnt += 1;
+                    }
+                }
+
+                // if the start frame not the Key frame, transcode the stream from start frame to the next GOP. 
+                if(!have_found_start_frame && stream_gop_cnt <= 1){
+                    //frist_video_packet_dts = pkt.dts;
+                    //continue;
+
+                    // decode the stream until find the start frame
+                    
+                    // decode the video frame
+                    ret = decode_video_packet(inctx->streams[input_video_stream_index]->codec, &pkt, &picture, &got_frame);
+                    if(ret < 0 || got_frame==0){
+                        printf("[debug] decode video , but not get frame.\n");
+                        
+                        not_get_decode_frame += 1;
+                        if(not_get_decode_frame > 10){
+                            printf("[error] long times for not_get_decode_frame:%d\n", not_get_decode_frame);
+                            return -1;
+                        }
+                        continue;
+                    }
+
+                    printf("[debug] decode video , picture pts=%d.\n", picture.pts);
+
+                    // start when time reach
+                    if(picture.pts < starttime_by_timebase){
+                        printf("[debug] time not ok , now picture pts=%d, start time:%d.\n", picture.pts, starttime_by_timebase);
+                        continue;
+                    }
+
+                    // save the first frame pts
+                    if(frist_video_packet_dts == 0){
+                        frist_video_packet_dts = picture.pts;
+                    }
+                    
+                    // break until next GOP
+                    if(picture.pts < jietime_by_timebase){
+                        //printf("[debug] get the jietu frame, picture pts: %lld\n", (pkt.dts - video_should_interval*not_get_decode_frame));
+                        
+                        // encode the picture
+                        av_init_packet(&pkt);
+                        pkt.data = NULL;
+                        pkt.size = 0;
+                        ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, &picture, &got_encode_frame);
+                        //if(ret < 0 || got_encode_frame ==0 ){
+                        if(ret < 0){
+                            printf("[error] encode picture error. return:%d\n", ret);
+                            return -1;
+                        }
+                        
+                        if(got_encode_frame){
+                            // write the pkt to stream
+                            pkt.stream_index = input_video_stream_index;
+                            pkt.dts = pkt.dts - frist_video_packet_dts;
+                            pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
+                            printf("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
+                            ret = av_interleaved_write_frame(outctx, &pkt);
+                            if (ret < 0) {
+                                printf("[error] Could not write frame of stream: %d\n", ret);
+                                return -1;
+                            }
+                        }
+
+                    }
+                }
+                else{
+                    //break;
+                    // reset the stream ctx
+                    if(!reset_stream_ctx_before_copy && 0){
+                        //
+                        avcodec_close(outVideoCodecCtx);
+
+                        reset_video_codec(inctx, outVideoCodecCtx, input_video_stream_index);
+                        
+                        video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
+                        outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
+                        memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
+                        outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
+
+                        printf("[debug] after open rebuild, enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
+                        print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
+                        
+                        //av_dump_format(outctx, 0, dest_path, 1); 
+                        
+                        //if(avformat_write_header(outctx, NULL)){
+                        //    printf("[error] outctx av_write_header error!\n");
+                        //    return -1;
+                        //}
+
+                        reset_stream_ctx_before_copy = 1;
+                    }
+
+                    // copy the frames until end time
+                    if(pkt.dts > jietime_by_timebase){
+                        printf("[debug] reach the end time, pkt.pts=%d, dts=%d, endtime=%d\n", pkt.pts, pkt.dts, jietime_by_timebase);
+                        break;
+                    }
+                    
+                    // modify the pkt ts
+                    pkt.stream_index = input_video_stream_index;
+                    pkt.dts = pkt.dts - frist_video_packet_dts;
+                    pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
+                    printf("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
+
+                    
+                    // write the frame 
+                    ret = av_interleaved_write_frame(outctx, &pkt);
+                    if (ret < 0) {
+                        printf("[error] Could not write frame of stream: %d\n", ret);
+                        return -1;
+                    }  
+
+                
+
+                }
             
-
             }
+            else if((pkt.stream_index == input_audio_stream_index) && have_found_start_frame){
+                
+                printf("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
+
+                if(frist_audio_packet_dts == 0){
+                    frist_audio_packet_dts = pkt.dts;
+                }
+                // if audio pkt , write
+                pkt.stream_index = input_audio_stream_index;
+                pkt.dts = pkt.dts - frist_audio_packet_dts;
+                pkt.pts = pkt.pts - frist_audio_packet_dts + 2*video_should_interval;
+                printf("[debug] audio pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
+                ret = av_interleaved_write_frame(outctx, &pkt);
+                if (ret < 0) {
+                    printf("[error] Could not write frame of stream: %d\n", ret);
+                    return -1;
+                }
+            }
+
+        }else{
+            // copy only
+
+        }
         
-        }
-        else if((pkt.stream_index == input_audio_stream_index) && have_found_start_frame){
-            continue;
-            printf("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
 
-            if(frist_audio_packet_dts == 0){
-                frist_audio_packet_dts = pkt.dts;
-            }
-            // if audio pkt , write
-            pkt.stream_index = input_audio_stream_index;
-            pkt.dts = pkt.dts - frist_audio_packet_dts;
-            pkt.pts = pkt.pts - frist_audio_packet_dts + 2*video_should_interval;
-            printf("[debug] audio pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
-            ret = av_interleaved_write_frame(outctx, &pkt);
-            if (ret < 0) {
-                printf("[error] Could not write frame of stream: %d\n", ret);
-                return -1;
-            }
-        }
+
     }
+
+
+    // fix me: need flush the encoder 
 
     // end of the stream
     av_write_trailer(outctx);
@@ -747,7 +861,7 @@ int main(int argc, char ** argv)
 	int end_time = atoi(argv[4]);
 
     
-    ret = slicer(input_filename, start_time, end_time, output_filename);
+    ret = slicer(input_filename, start_time, end_time, output_filename, SLICER_MODE_ENCODE_ONLY);
     printf("slicer return: %d\n", ret);
 
     return 0;
