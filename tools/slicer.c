@@ -582,7 +582,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
                 // if the frame is key frame and is the start frame, then start copy, else to decode the frames until get the start frame.
                 
                 if(!have_found_start_frame){
-                    if((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.pts >= starttime_by_timebase && pkt.pts < starttime_by_timebase)){
+                    if((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.pts >= starttime_by_timebase)){
                         have_found_start_frame = 1;
                         frist_video_packet_dts = pkt.dts;
                     }
@@ -679,7 +679,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
                 // if the frame is key frame and is the start frame, then start copy, else to decode the frames until get the start frame.
                 
                 if(!have_found_start_frame){
-                    if((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.pts >= starttime_by_timebase && pkt.pts < starttime_by_timebase)){
+                    if((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.pts >= starttime_by_timebase)){
                         have_found_start_frame = 1;
                         frist_video_packet_dts = pkt.dts;
                     }
