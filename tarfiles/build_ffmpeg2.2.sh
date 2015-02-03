@@ -112,6 +112,25 @@ fi
 popd
 
 
+# yasm
+pushd ${build_dir} 
+if ! [ -e "yasm" ]
+then
+    echo "########## libx264 begin ##########"
+    tar xf yasm-1.2.0.tar.gz
+    pushd yasm-1.2.0
+    ./configure --prefix=${release_dir}
+    make
+    make install
+    popd
+    touch yasm
+    echo "########## yasm ok ##########"
+else
+    echo "########## yasm has been installed ##########"
+fi
+popd
+
+
 # ffmpeg
 pushd ${build_dir} 
 if ! [ -e "ffmpeg2.2" ]
