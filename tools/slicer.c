@@ -421,7 +421,14 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
 
         outVideoCodecCtx->rc_buffer_size = inctx->streams[input_video_stream_index]->codec->rc_buffer_size;
         outVideoCodecCtx->pix_fmt = inctx->streams[input_video_stream_index]->codec->pix_fmt;
-        outVideoCodecCtx->time_base = inctx->streams[input_video_stream_index]->codec->time_base;  
+
+        if(inctx->streams[input_video_stream_index]->codec->ticks_per_frame > 0)
+            outVideoCodecCtx->time_base.den = inctx->streams[input_video_stream_index]->codec->time_base.den / inctx->streams[input_video_stream_index]->codec->ticks_per_frame;  
+        else
+            outVideoCodecCtx->time_base.den = inctx->streams[input_video_stream_index]->codec->time_base.den;
+
+        outVideoCodecCtx->time_base.num = inctx->streams[input_video_stream_index]->codec->time_base.num;  
+
 
         outVideoCodecCtx->width = inctx->streams[input_video_stream_index]->codec->width;
         outVideoCodecCtx->height = inctx->streams[input_video_stream_index]->codec->height;
@@ -626,7 +633,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
                 if(!have_found_start_frame){
                     if((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.pts >= starttime_by_timebase)){
                         have_found_start_frame = 1;
-                        frist_video_packet_dts = pkt.dts;
+                        //frist_video_packet_dts = pkt.dts;
                     }
 
                     if(pkt.flags & AV_PKT_FLAG_KEY){
@@ -678,12 +685,13 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
                     return -1;
                 }
                 
-                // save the first frame pts
-                if(frist_video_packet_dts == 0){
-                    frist_video_packet_dts = picture.pts;
-                }
-                
+
+
                 if(got_encode_frame){
+                    // save the first frame pts
+                    if(frist_video_packet_dts == 0){
+                        frist_video_packet_dts = picture.pts;
+                    }
                     // write the pkt to stream
                     pkt.stream_index = input_video_stream_index;
                     pkt.dts = pkt.dts - frist_video_packet_dts;
