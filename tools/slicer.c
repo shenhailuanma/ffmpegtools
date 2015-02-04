@@ -662,10 +662,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
                     break;
                 }
 
-                // save the first frame pts
-                if(frist_video_packet_dts == 0){
-                    frist_video_packet_dts = picture.pts;
-                }
+
                     
 
                         
@@ -679,6 +676,11 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
                 if(ret < 0){
                     printf("[error] encode picture error. return:%d\n", ret);
                     return -1;
+                }
+                
+                // save the first frame pts
+                if(frist_video_packet_dts == 0){
+                    frist_video_packet_dts = picture.pts;
                 }
                 
                 if(got_encode_frame){
