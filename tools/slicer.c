@@ -162,6 +162,48 @@ static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame
 }
 
 
+static void flush_video_frames(AVFormatContext * outctx, AVCodecContext  * outVideoCodecCtx,
+                                int input_video_stream_index, int frist_video_packet_dts, int video_should_interval)
+{
+
+    int ret = 0;
+    int got_encode_frame = 0;
+    AVPacket pkt; 
+
+
+    // encode the picture
+    av_init_packet(&pkt);
+    pkt.data = NULL;
+    pkt.size = 0;
+
+
+    while(1){
+        ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, NULL, &got_encode_frame);
+        //if(ret < 0 || got_encode_frame ==0 ){
+        if(ret < 0){
+            printf("[error] encode picture error. return:%d\n", ret);
+            break;
+        }
+        
+        if(got_encode_frame){
+            // write the pkt to stream
+            pkt.stream_index = input_video_stream_index;
+            pkt.dts = pkt.dts - frist_video_packet_dts;
+            pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
+            //printf("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
+            ret = av_interleaved_write_frame(outctx, &pkt);
+            if (ret < 0) {
+                printf("[error] Could not write frame of stream: %d\n", ret);
+                break;
+            }
+        }else{
+
+            break;
+        }
+    }
+
+}
+
 
 /*
     Function: slicer
@@ -616,6 +658,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
 
                 if(picture.pts > jietime_by_timebase){
                     printf("[debug] reach the end time,  endtime=%d\n", jietime_by_timebase);
+                    flush_video_frames(outctx, outVideoCodecCtx, input_video_stream_index, frist_video_packet_dts, video_should_interval);
                     break;
                 }
 

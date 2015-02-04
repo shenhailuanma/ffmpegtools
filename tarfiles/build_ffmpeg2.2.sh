@@ -12,6 +12,26 @@ cp -rf yasm-1.2.0.tar.gz libaacplus-2.0.2.tar.gz 26410-800.zip faac-1.28.tar.bz2
 
 
 export PKG_CONFIG_PATH=${PKG_CONFIG_PATH}:${release_dir}/lib/pkgconfig
+export PATH=${PATH}:${release_dir}/bin
+
+# yasm
+pushd ${build_dir} 
+if ! [ -e "yasm" ]
+then
+    echo "########## libx264 begin ##########"
+    tar xf yasm-1.2.0.tar.gz
+    pushd yasm-1.2.0
+    ./configure 
+    make
+    make install
+    popd
+    touch yasm
+    echo "########## yasm ok ##########"
+else
+    echo "########## yasm has been installed ##########"
+fi
+popd
+
 
 # libaacplus
 pushd ${build_dir}
@@ -91,23 +111,7 @@ else
 fi
 popd
 
-# yasm
-pushd ${build_dir} 
-if ! [ -e "yasm" ]
-then
-    echo "########## libx264 begin ##########"
-    tar xf yasm-1.2.0.tar.gz
-    pushd yasm-1.2.0
-    ./configure --prefix=${release_dir}
-    make
-    make install
-    popd
-    touch yasm
-    echo "########## yasm ok ##########"
-else
-    echo "########## yasm has been installed ##########"
-fi
-popd
+
 
 # libx264
 pushd ${build_dir} 
