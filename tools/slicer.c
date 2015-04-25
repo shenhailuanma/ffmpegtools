@@ -78,7 +78,7 @@ static int reset_video_codec(AVFormatContext * inctx, AVCodecContext * ctx, int 
     
     
     //if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
-        ctx->flags |= CODEC_FLAG_GLOBAL_HEADER;
+        //ctx->flags |= CODEC_FLAG_GLOBAL_HEADER;
     
     //printf("[debug] enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
     //print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
@@ -97,6 +97,10 @@ static int reset_video_codec(AVFormatContext * inctx, AVCodecContext * ctx, int 
     //    av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
     //}
 
+    AVDictionary *video_encoder_options = NULL;
+    if(ctx->codec_id == AV_CODEC_ID_H264){
+         av_dict_set(&video_encoder_options, "x264-params", "sps-id=2", 0);   
+    }
 
     // open the codec
     AVCodec * outViedeCodec = NULL;
@@ -113,7 +117,7 @@ static int reset_video_codec(AVFormatContext * inctx, AVCodecContext * ctx, int 
         // open it 
         printf("[debug] open video encodec codec, id:%d, name:%s\n",ctx->codec_id, outViedeCodec->name);
 
-        ret = avcodec_open2(ctx, outViedeCodec, NULL);
+        ret = avcodec_open2(ctx, outViedeCodec, video_encoder_options);
         if (ret < 0) {
             printf("[error] could not open video encode codec\n");
             return -1;
@@ -456,8 +460,8 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
         printf("qcompress:%f\n", outVideoCodecCtx->qcompress);
         
         
-        if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
-            outVideoCodecCtx->flags |= CODEC_FLAG_GLOBAL_HEADER;
+        //if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
+        //    outVideoCodecCtx->flags |= CODEC_FLAG_GLOBAL_HEADER;
 
         //printf("[debug] enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
         //print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
@@ -532,8 +536,12 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
     }else{
         // open it 
         printf("[debug] open video encodec codec, id:%d, name:%s\n",outVideoCodecCtx->codec_id, outViedeCodec->name);
-
-        ret = avcodec_open2(outVideoCodecCtx, outViedeCodec, NULL);
+        AVDictionary *video_encoder_options = NULL;
+        if(ctx->codec_id == AV_CODEC_ID_H264){
+             av_dict_set(&video_encoder_options, "x264-params", "sps-id=2", 0);   
+        }
+    
+        ret = avcodec_open2(outVideoCodecCtx, outViedeCodec, video_encoder_options);
         if (ret < 0) {
             printf("[error] could not open video encode codec\n");
             return -1;
