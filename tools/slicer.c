@@ -12,6 +12,8 @@
 #include "libavcodec/avcodec.h"
 
 
+
+/****  Defines *****/
 static int Glb_Log_Level = 4;
 #define LOG_DEBUG(format, arg...)    \
     if (Glb_Log_Level >=4) {    \
@@ -58,6 +60,56 @@ static int Glb_Log_Level = 4;
 #define SLICER_MODE_COPY_ONLY         1
 #define SLICER_MODE_ENCODE_COPY       2
 
+
+
+    AVFormatContext * inctx = NULL;
+    int input_video_stream_index = -1;
+    int input_audio_stream_index = -1;
+    AVCodecContext  * inVideoCodecCtx = NULL;
+    int inWidth  = 0;
+    int inHeight = 0;
+    AVCodec * inViedeCodec = NULL;
+    int input_video_timebase_num  = 0;
+    int input_video_timebase_den  = 0;
+    int input_video_stream_timebase_num  = 0;
+    int input_video_stream_timebase_den  = 0;
+    int input_video_ticks_per_frame = 1;
+    int input_fps_num = 1;
+    int input_fps_den = 1;
+    int starttime_by_timebase;    // end time in video timebase
+    int jietime_by_timebase;    // end time in video timebase
+    AVFrame picture;
+    int got_frame = 0;
+
+    AVFormatContext * outctx = NULL;
+    AVOutputFormat  * fmt = NULL;  // output format
+    AVStream        * video_st = NULL;    // output stream
+    AVStream        * audio_st = NULL;    // output stream
+    AVCodecContext  * outVideoCodecCtx = NULL;  // video encode codec ctx
+    AVCodecContext  * outAudioCodecCtx = NULL;
+    AVCodec * outViedeCodec = NULL;
+    int got_encode_frame = 0;
+
+    AVPacket pkt; 
+    int not_get_decode_frame = 0;
+    int64_t frist_video_packet_dts = 0;
+    int64_t frist_audio_packet_dts = 0;
+    int have_found_start_frame = 0;
+    int have_found_end_frame = 0;
+    int stream_gop_cnt = 0;
+    int reset_stream_ctx_before_copy = 0;
+    int reset_stream_ctx_before_end  = 0;
+    
+
+typedef struct {
+    /* the media url */
+
+} Clicer_t;
+
+
+
+
+/******  Functions ******/
 
 static void print_hex(char * phex, int size)
 {
