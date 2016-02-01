@@ -56,55 +56,48 @@ static int Glb_Log_Level = 4;
     }
 
 
-#define SLICER_MODE_ENCODE_ONLY       0
-#define SLICER_MODE_COPY_ONLY         1
-#define SLICER_MODE_ENCODE_COPY       2
+#define SLICER_MODE_ENCODE_ONLY             0
+#define SLICER_MODE_COPY_ONLY               1
+#define SLICER_MODE_ENCODE_COPY_ENCODE      2
 
 
-
-    AVFormatContext * inctx = NULL;
-    int input_video_stream_index = -1;
-    int input_audio_stream_index = -1;
-    AVCodecContext  * inVideoCodecCtx = NULL;
-    int inWidth  = 0;
-    int inHeight = 0;
-    AVCodec * inViedeCodec = NULL;
-    int input_video_timebase_num  = 0;
-    int input_video_timebase_den  = 0;
-    int input_video_stream_timebase_num  = 0;
-    int input_video_stream_timebase_den  = 0;
-    int input_video_ticks_per_frame = 1;
-    int input_fps_num = 1;
-    int input_fps_den = 1;
-    int starttime_by_timebase;    // end time in video timebase
-    int jietime_by_timebase;    // end time in video timebase
-    AVFrame picture;
-    int got_frame = 0;
-
-    AVFormatContext * outctx = NULL;
-    AVOutputFormat  * fmt = NULL;  // output format
-    AVStream        * video_st = NULL;    // output stream
-    AVStream        * audio_st = NULL;    // output stream
-    AVCodecContext  * outVideoCodecCtx = NULL;  // video encode codec ctx
-    AVCodecContext  * outAudioCodecCtx = NULL;
-    AVCodec * outViedeCodec = NULL;
-    int got_encode_frame = 0;
-
-    AVPacket pkt; 
-    int not_get_decode_frame = 0;
-    int64_t frist_video_packet_dts = 0;
-    int64_t frist_audio_packet_dts = 0;
-    int have_found_start_frame = 0;
-    int have_found_end_frame = 0;
-    int stream_gop_cnt = 0;
-    int reset_stream_ctx_before_copy = 0;
-    int reset_stream_ctx_before_end  = 0;
     
+typedef struct {
+    /* the input media url */
+    char input_url[256];
+
+    /* the output media url */
+    char output_url[256];
+
+    /* start time, times units is ms*/
+    int start_time;
+
+    /* end time, times units is ms*/
+    int end_time;
+
+    /* slice mode*/
+    int slice_mode;
+
+    /* log levle */
+    int log_level;
+
+    /**/
+    char output_format[32];
+
+} Slicer_Params_t;
+
 
 typedef struct {
-    /* the media url */
+    /* slicer params */
+    Slicer_Params_t params;
 
-} Clicer_t;
+    /* the input media context */
+    AVFormatContext * input_ctx;
+
+    /* the ouput media context */
+    AVFormatContext * output_ctx;
+
+} Slicer_t;
 
 
 
@@ -125,106 +118,246 @@ static void print_hex(char * phex, int size)
 }
 
 
-static int reset_video_codec(AVFormatContext * inctx, AVCodecContext * ctx, int input_video_stream_index){
+static void Slicer_params_default(Slicer_Params_t * params)
+{
+    memset(params, 0, sizeof(Slicer_Params_t));
+    params->slice_mode = SLICER_MODE_COPY_ONLY;
+    params->log_level = 4;
+}
 
 
-    AVDictionaryEntry *t = NULL;
-    
-    avcodec_get_context_defaults3(ctx, NULL);
-
-    ctx->codec_id = inctx->streams[input_video_stream_index]->codec->codec_id;
-    ctx->codec_type = inctx->streams[input_video_stream_index]->codec->codec_type;
-    /*
-    (!outVideoCodecCtx->codec_tag){
-            if( !outctx->oformat->codec_tag
-               || av_codec_get_id (outctx->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_tag) == outVideoCodecCtx->codec_id
-               || av_codec_get_tag(outctx->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_id) <= 0)
-                outVideoCodecCtx->codec_tag = inctx->streams[i]->codec->codec_tag;
-    }
-    */
-    ctx->bit_rate = inctx->streams[input_video_stream_index]->codec->bit_rate;
-    ctx->bit_rate_tolerance = inctx->streams[input_video_stream_index]->codec->bit_rate_tolerance;
-    
-    ctx->rc_buffer_size = inctx->streams[input_video_stream_index]->codec->rc_buffer_size;
-    ctx->pix_fmt = inctx->streams[input_video_stream_index]->codec->pix_fmt;
-    ctx->time_base = inctx->streams[input_video_stream_index]->codec->time_base;  
-    
-    ctx->width = inctx->streams[input_video_stream_index]->codec->width;
-    ctx->height = inctx->streams[input_video_stream_index]->codec->height;
-    LOG_DEBUG("width:%d, height:%d\n", ctx->width, ctx->height);
-    
-    ctx->has_b_frames = inctx->streams[input_video_stream_index]->codec->has_b_frames;
-    
-    ctx->me_range  = inctx->streams[input_video_stream_index]->codec->me_range;
-    if(ctx->me_range == 0){
-        ctx->me_range = 16;
-    }
-    LOG_DEBUG("me_range:%d\n", ctx->me_range);
-    
-    
-    ctx->max_qdiff = inctx->streams[input_video_stream_index]->codec->max_qdiff;
-    LOG_DEBUG("max_qdiff:%d\n", ctx->max_qdiff);
-    
-    ctx->qmin      = inctx->streams[input_video_stream_index]->codec->qmin;
-    LOG_DEBUG("qmin:%d\n", ctx->qmin);
-    ctx->qmax      = inctx->streams[input_video_stream_index]->codec->qmax;
-    LOG_DEBUG("qmax:%d\n", ctx->qmax);
-    
-    //outVideoCodecCtx->qcompress = inctx->streams[input_video_stream_index]->codec->qcompress;
-    ctx->qcompress = 0.6;
-    LOG_DEBUG("qcompress:%f\n", ctx->qcompress);
-    
-    
-    //if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
-        //ctx->flags |= CODEC_FLAG_GLOBAL_HEADER;
-    
-    //LOG_DEBUG("[debug] enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
-    //print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
-    
-    //video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
-    //outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
-    //memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
-    //outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
-    
-    //LOG_DEBUG("[debug] enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
-    //print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
-    
-    
-    //while ((t = av_dict_get(inctx->streams[input_video_stream_index]->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
-     //   LOG_DEBUG("stream metadata: %s=%s.\n", t->key, t->value);
-    //    av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
-    //}
-
-    AVDictionary *video_encoder_options = NULL;
-    if(ctx->codec_id == AV_CODEC_ID_H264){
-         av_dict_set(&video_encoder_options, "x264-params", "sps-id=2", 0);   
-    }
-
-    // open the codec
-    AVCodec * outViedeCodec = NULL;
-    int ret = 0;
-    int video_extra_size= 0;
-    char * video_extradata = NULL;
-    
-    
-    outViedeCodec = avcodec_find_encoder(ctx->codec_id);
-    if(outViedeCodec == NULL){
-        LOG_DEBUG("[error] outViedeCodec %d not found !\n", ctx->codec_id);
+static int Slicer_open_input_media(Slicer_t *obj)
+{
+    if(obj == NULL){
+        LOG_ERROR("Slicer_open_input_media input arg: obj is NULL\n");
         return -1;
-    }else{
-        // open it 
-        LOG_DEBUG("[debug] open video encodec codec, id:%d, name:%s\n",ctx->codec_id, outViedeCodec->name);
+    }
 
-        ret = avcodec_open2(ctx, outViedeCodec, video_encoder_options);
-        if (ret < 0) {
-            LOG_DEBUG("[error] could not open video encode codec\n");
+    int ret = 0;
+
+    obj->input_ctx = NULL;
+    ret = avformat_open_input(&obj->input_ctx, obj->params.input_url, NULL, NULL);
+    if (ret < 0 || obj->input_ctx == NULL) {
+        LOG_ERROR("open stream: '%s', error code: %d \n", obj->params.input_url, ret);
+        return -1;
+    }
+
+    ret = avformat_find_stream_info(obj->input_ctx, NULL);
+    if (ret < 0) {
+        LOG_ERROR("could not find stream info.\n");
+        return -1;
+    }
+
+    obj->input_ctx->flags |= AVFMT_FLAG_GENPTS;
+    av_dump_format(obj->input_ctx, 0, obj->input_ctx->filename, 0);
+
+    // if slice mode need encode, should open the decoder and encoder
+    if(obj->params.slice_mode == SLICER_MODE_ENCODE_ONLY || obj->params.slice_mode == SLICER_MODE_ENCODE_COPY_ENCODE){
+        LOG_DEBUG("slice mode need encode, to open the decoder.\n");
+
+        // open the decoder
+
+
+    }else{
+        LOG_DEBUG("slice mode no need encode, just copy it.\n");
+    }
+
+    return 0;
+}
+
+
+static int Slicer_open_output_media(Slicer_t *obj)
+{
+    if(obj == NULL){
+        LOG_ERROR("Slicer_open_output_media input arg: obj is NULL\n");
+        return -1;
+    }
+
+    int ret = 0;
+    AVOutputFormat  * fmt = NULL;
+    obj->output_ctx = NULL;
+    
+
+    avformat_alloc_output_context2(&obj->output_ctx, NULL, NULL, obj->params.output_url);
+    if (!obj->output_ctx) {
+        LOG_ERROR("Could not create output context\n");
+        return -1;
+    }
+    /*
+    obj->output_ctx = avformat_alloc_context();
+    LOG_DEBUG("input_ctx->iformat->name:%s", obj->input_ctx->iformat->name);
+    if(strncmp(obj->input_ctx->iformat->name, "ts", sizeof("ts")) == 0){
+        fmt = av_guess_format("mpegts", NULL, NULL);
+    } else if(strncmp(obj->input_ctx->iformat->name, "flv", sizeof("flv")) == 0){
+        fmt = av_guess_format("flv", NULL, NULL);
+    } else {
+        fmt = av_guess_format("mp4", NULL, NULL);
+    }
+
+    fmt = av_guess_format(obj->input_ctx->iformat->name, NULL, NULL);
+    if (!fmt) {
+        LOG_DEBUG("[error] Could not find %s format", obj->input_ctx->iformat->name);
+        return -1;
+    }
+
+    obj->output_ctx->oformat = fmt;  
+    */
+
+
+    int i;
+    for (i = 0; i < obj->input_ctx->nb_streams; i++) {
+        AVStream *in_stream = obj->input_ctx->streams[i];
+        AVStream *out_stream = avformat_new_stream(obj->output_ctx, in_stream->codec->codec);
+        if (!out_stream) {
+            LOG_ERROR("Failed allocating output stream\n");
             return -1;
         }
-  
-    }
-    
 
+        ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
+        if (ret < 0) {
+            LOG_ERROR("Failed to copy context from input to output stream codec context\n");
+            return -1;
+        }
+        if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER)
+            out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+    }
+    av_dump_format(obj->output_ctx, 0, obj->params.output_url, 1);
+
+
+
+    if (avio_open(&obj->output_ctx->pb, obj->params.output_url, AVIO_FLAG_READ_WRITE) < 0){
+        LOG_ERROR("open output file:%s error.\n", obj->params.output_url);
+        return -1;
+    }
+
+    // if slice mode need encode, should open the decoder and encoder
+    if(obj->params.slice_mode == SLICER_MODE_ENCODE_ONLY || obj->params.slice_mode == SLICER_MODE_ENCODE_COPY_ENCODE){
+        LOG_DEBUG("slice mode need encode, to open the encoder.\n");
+
+        // open the encoder
+
+
+    }else{
+        LOG_DEBUG("slice mode no need encode, just copy it.\n");
+    }
+
+    return 0;
 }
+
+/** init the slicer **/
+static int Slicer_init(Slicer_t *obj, Slicer_Params_t * params)
+{
+
+    // simple check the input args
+    if(obj == NULL){
+        LOG_ERROR("Slicer_init input arg: obj is NULL\n");
+        return -1;
+    }
+    if(params == NULL){
+        LOG_ERROR("Slicer_init input arg: params is NULL\n");
+        return -1;
+    }
+
+    /** get default params **/
+    Slicer_params_default(&obj->params);
+
+
+    /** update the params **/
+    if(strlen(params->input_url) > 0){
+        LOG_INFO("param input_url:%s\n", params->input_url);
+        strcpy(obj->params.input_url, params->input_url);
+    }else{
+        LOG_ERROR("param input_url is None\n");
+        return -1;
+    }
+
+    if(strlen(params->output_url) > 0){
+        LOG_INFO("param output_url:%s\n", params->output_url);
+        strcpy(obj->params.output_url, params->output_url);
+    }else{
+        LOG_ERROR("param output_url is None\n");
+        return -1;
+    }
+
+    if(params->start_time >= 0){
+        LOG_INFO("param start_time:%d\n", params->start_time);
+        obj->params.start_time = params->start_time;
+    }else{
+        LOG_ERROR("param start_time:%d is invalid.\n", params->start_time);
+        return -1;
+    }
+
+    if(params->end_time > 0){
+        LOG_INFO("param end_time:%d\n", params->end_time);
+        obj->params.end_time = params->end_time;
+    }else{
+        LOG_ERROR("param end_time:%d is invalid.\n", params->end_time);
+        return -1;
+    }
+
+    switch(params->slice_mode){
+        case SLICER_MODE_ENCODE_ONLY:
+            LOG_INFO("param slice_mode: encode only.\n");
+            obj->params.slice_mode = SLICER_MODE_ENCODE_ONLY;
+            break;
+        case SLICER_MODE_COPY_ONLY:
+            LOG_INFO("param slice_mode: copy only.\n");
+            obj->params.slice_mode = SLICER_MODE_COPY_ONLY;
+            break;
+        case SLICER_MODE_ENCODE_COPY_ENCODE:
+            LOG_INFO("param slice_mode: encode copy encode.\n");
+            obj->params.slice_mode = SLICER_MODE_ENCODE_COPY_ENCODE;
+            break;
+        default:
+            LOG_INFO("param slice_mode use default mode: encode only.\n");
+            obj->params.slice_mode = SLICER_MODE_ENCODE_ONLY;
+    }
+
+    /** register all ffmpeg lib**/
+    av_register_all();
+
+    /** open the input media **/
+    LOG_DEBUG("To open the input media.\n");
+    if(Slicer_open_input_media(obj) < 0){
+        LOG_ERROR("open the input media error.\n");
+        return -1;
+    }
+
+    LOG_DEBUG("To open the input media ok.\n");
+
+    // open the output media
+    if(Slicer_open_output_media(obj) < 0){
+        LOG_ERROR("open the output media error.\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+
+int Slicer(Slicer_Params_t * params)
+{
+    Slicer_t slicer;
+
+    memset(&slicer, 0, sizeof(Slicer_t));
+
+
+    Slicer_init(&slicer, params);
+
+    // do slice
+
+    // read frame
+
+    // decode video frame
+
+    // encode video frame
+
+    // write frame
+
+
+    return 0;
+}
+
 
 static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame * picture, int * got_frame)
 {
@@ -320,7 +453,7 @@ static void flush_video_frames(AVFormatContext * outctx, AVCodecContext  * outVi
         0 : means ok
         not 0 : means error
 */
-int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
+int slicer2(char * src, int starttime, int endtime, char * dest_path, int mode)
 {
     int ret;
     int i;
@@ -460,6 +593,8 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
 
     //// open the output file
     outctx = avformat_alloc_context();
+
+    
     if(strncmp(inctx->iformat->name, "ts", sizeof("ts")) == 0){
         fmt = av_guess_format("mpegts", NULL, NULL);
     } else if(strncmp(inctx->iformat->name, "flv", sizeof("flv")) == 0){
@@ -468,7 +603,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
         fmt = av_guess_format("mp4", NULL, NULL);
     }
     if (!fmt) {
-        LOG_DEBUG("[error] Could not find %s format", inctx->iformat->name);
+        LOG_DEBUG("Could not find %s format", inctx->iformat->name);
         return -1;
     }
 
@@ -635,7 +770,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
         // open it 
         LOG_DEBUG("[debug] open video encodec codec, id:%d, name:%s\n",outVideoCodecCtx->codec_id, outViedeCodec->name);
         AVDictionary *video_encoder_options = NULL;
-        if(ctx->codec_id == AV_CODEC_ID_H264){
+        if(outVideoCodecCtx->codec_id == AV_CODEC_ID_H264){
              av_dict_set(&video_encoder_options, "x264-params", "sps-id=2", 0);   
         }
     
@@ -830,7 +965,7 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
             }
 
 
-        }else if (mode == SLICER_MODE_ENCODE_COPY){
+        }else if (mode == SLICER_MODE_ENCODE_COPY_ENCODE){
 
             if(pkt.stream_index == input_video_stream_index){
                 LOG_DEBUG("[debug] video pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
@@ -912,31 +1047,6 @@ int slicer(char * src, int starttime, int endtime, char * dest_path, int mode)
                     }
                 }
                 else{
-                    //break;
-                    // reset the stream ctx
-                    if(!reset_stream_ctx_before_copy && 0){
-                        //
-                        avcodec_close(outVideoCodecCtx);
-
-                        reset_video_codec(inctx, outVideoCodecCtx, input_video_stream_index);
-                        
-                        video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
-                        outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
-                        memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
-                        outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
-
-                        LOG_DEBUG("[debug] after open rebuild, enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
-                        print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
-                        
-                        //av_dump_format(outctx, 0, dest_path, 1); 
-                        
-                        //if(avformat_write_header(outctx, NULL)){
-                        //    LOG_DEBUG("[error] outctx av_write_header error!\n");
-                        //    return -1;
-                        //}
-
-                        reset_stream_ctx_before_copy = 1;
-                    }
 
                     // copy the frames until end time
                     if(pkt.dts > jietime_by_timebase){
@@ -1013,14 +1123,22 @@ int main(int argc, char ** argv)
     LOG_DEBUG("Usage: ./slicer <input filename> <output filename> <start time> <end time> \n");
     LOG_DEBUG("Need to pay attention to: times units is ms \n");
 
+    Slicer_Params_t params;
 
-	char *input_filename = argv[1];
-	char *output_filename = argv[2];
-	int start_time = atoi(argv[3]);
-	int end_time = atoi(argv[4]);
+    memset(&params, 0, sizeof(Slicer_Params_t));
 
+	//char *input_filename = argv[1];
+	//char *output_filename = argv[2];
+	//int start_time = atoi(argv[3]);
+	//int end_time = atoi(argv[4]);
+
+    strcpy(params.input_url, "/root/Meerkats.mp4");
+    strcpy(params.output_url, "out.flv");
+    params.start_time = 10;
+    params.end_time = 30;
+    params.slice_mode = SLICER_MODE_COPY_ONLY;
     
-    ret = slicer(input_filename, start_time, end_time, output_filename, SLICER_MODE_ENCODE_ONLY);
+    ret = Slicer(&params);
     LOG_DEBUG("slicer return: %d\n", ret);
 
     return 0;
