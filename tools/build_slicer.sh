@@ -11,11 +11,14 @@ mkdir -p ${build_dir}
 mkdir -p ${release_dir}
 
 
-gcc -o ${current_dir}/tools/slicer ${current_dir}/tools/slicer.c -I${release_dir}/include ${release_dir}/lib/libavformat.a \
+gcc -o ${current_dir}/tools/slicer ${current_dir}/tools/slicer.c -I${release_dir}/include \
+${release_dir}/lib/libavformat.a \
 ${release_dir}/lib/libavcodec.a \
 ${release_dir}/lib/libavdevice.a \
 ${release_dir}/lib/libavfilter.a \
 ${release_dir}/lib/libavutil.a \
+${release_dir}/lib/libswscale.a \
+${release_dir}/lib/libswresample.a \
 ${release_dir}/lib/libopencore-amrnb.a \
 ${release_dir}/lib/libopencore-amrwb.a \
 ${release_dir}/lib/libpostproc.a \

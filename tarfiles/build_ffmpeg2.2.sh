@@ -160,7 +160,7 @@ then
 --enable-postproc \
 --enable-demuxer=oss \
 --enable-static --enable-nonfree \
---enable-version3 --enable-libopencore-amrnb \
+--enable-version3 --enable-libopencore-amrnb 
 
     echo "ffmpeg2.2 begin make"
     make

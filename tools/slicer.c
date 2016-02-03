@@ -12,6 +12,9 @@
 #include "libavcodec/avcodec.h"
 
 
+#include "libavutil/timestamp.h"
+
+
 
 /****  Defines *****/
 static int Glb_Log_Level = 4;
@@ -60,7 +63,23 @@ static int Glb_Log_Level = 4;
 #define SLICER_MODE_COPY_ONLY               1
 #define SLICER_MODE_ENCODE_COPY_ENCODE      2
 
+#define SLICER_TIME_BASE 
 
+
+typedef struct list_head{
+  struct list_head *next;
+  struct list_head *prev;
+} list_t;
+
+/* Initialize a new list head.  */
+#define INIT_LIST_HEAD(ptr)  (ptr)->next = (ptr)->prev = (ptr)
+
+#define container_of(ptr, type, member) \
+  (type *)((char *)ptr - \
+  (unsigned long)(&(((type *)0)->member)))
+
+#define list_entry(ptr, type, member) \
+  container_of(ptr, type, member)
     
 typedef struct {
     /* the input media url */
@@ -97,12 +116,62 @@ typedef struct {
     /* the ouput media context */
     AVFormatContext * output_ctx;
 
+    /* the slice start time that use common timebase */
+    int64_t slice_start_time;
+
+    /* the slice end time that use common timebase */
+    int64_t slice_end_time;
+
+    /* the video Key frame timestamp which just before the user set slice start time */
+    int64_t key_frame_timestamp_before_start_time;
+
+    /* the video Key frame timestamp which just before the user set slice end time */
+    int64_t key_frame_timestamp_before_end_time;
+
+    /* packets queue, used in mode:'encode copy encode' */
+    struct list_head packets_queue_head;
+
+    /* packets group count, used in mode:'encode copy encode' */
+    int packets_group_count;
+
+    int first_video_stream_index;
+
 } Slicer_t;
 
-
+typedef struct Slicer_Packet_t{
+    struct list_head head;
+    AVPacket packet;
+    int number;
+}Slicer_Packet_t;
 
 
 /******  Functions ******/
+/* Add new element at the head of the list.  */
+static inline void list_add(list_t *newp, list_t *head)
+{
+    head->next->prev = newp;
+    newp->next = head->next;
+    newp->prev = head;
+    head->next = newp;
+}
+
+
+/* Add new element at the tail of the list.  */
+static inline void list_add_tail(list_t *newp, list_t *head)
+{
+    head->prev->next = newp;
+    newp->next = head;
+    newp->prev = head->prev;
+    head->prev = newp;
+}
+
+
+/* Remove element from list.  */
+static inline void list_del(list_t *elem)
+{
+    elem->next->prev = elem->prev;
+    elem->prev->next = elem->next;
+}
 
 static void print_hex(char * phex, int size)
 {
@@ -148,7 +217,7 @@ static int Slicer_open_input_media(Slicer_t *obj)
         return -1;
     }
 
-    obj->input_ctx->flags |= AVFMT_FLAG_GENPTS;
+    //obj->input_ctx->flags |= AVFMT_FLAG_GENPTS;
     av_dump_format(obj->input_ctx, 0, obj->input_ctx->filename, 0);
 
     // if slice mode need encode, should open the decoder and encoder
@@ -179,66 +248,78 @@ static int Slicer_open_output_media(Slicer_t *obj)
     
 
     avformat_alloc_output_context2(&obj->output_ctx, NULL, NULL, obj->params.output_url);
+    //avformat_alloc_output_context2(&obj->output_ctx, NULL, "mp4", obj->params.output_url);
     if (!obj->output_ctx) {
         LOG_ERROR("Could not create output context\n");
         return -1;
     }
-    /*
-    obj->output_ctx = avformat_alloc_context();
-    LOG_DEBUG("input_ctx->iformat->name:%s", obj->input_ctx->iformat->name);
-    if(strncmp(obj->input_ctx->iformat->name, "ts", sizeof("ts")) == 0){
-        fmt = av_guess_format("mpegts", NULL, NULL);
-    } else if(strncmp(obj->input_ctx->iformat->name, "flv", sizeof("flv")) == 0){
-        fmt = av_guess_format("flv", NULL, NULL);
-    } else {
-        fmt = av_guess_format("mp4", NULL, NULL);
-    }
-
-    fmt = av_guess_format(obj->input_ctx->iformat->name, NULL, NULL);
-    if (!fmt) {
-        LOG_DEBUG("[error] Could not find %s format", obj->input_ctx->iformat->name);
-        return -1;
-    }
-
-    obj->output_ctx->oformat = fmt;  
-    */
 
 
     int i;
+    AVStream *in_stream = NULL;
+    AVStream *out_stream = NULL;
     for (i = 0; i < obj->input_ctx->nb_streams; i++) {
-        AVStream *in_stream = obj->input_ctx->streams[i];
-        AVStream *out_stream = avformat_new_stream(obj->output_ctx, in_stream->codec->codec);
+        in_stream  = obj->input_ctx->streams[i];
+        out_stream = avformat_new_stream(obj->output_ctx, in_stream->codec->codec);
         if (!out_stream) {
             LOG_ERROR("Failed allocating output stream\n");
             return -1;
         }
 
+        ret = 0;
         ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
         if (ret < 0) {
             LOG_ERROR("Failed to copy context from input to output stream codec context\n");
             return -1;
         }
-        if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER)
+        out_stream->codec->codec_tag = 0;
+        if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER){
+            LOG_DEBUG("AVFMT_GLOBALHEADER is True.\n");
             out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+        }
+
+        if ((in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) && (obj->first_video_stream_index == 0)){
+            obj->first_video_stream_index = i;
+        }
+
+        LOG_DEBUG("codec id:%d\n", out_stream->codec->codec_id);
+        LOG_DEBUG("codec name:%s\n", out_stream->codec->codec_name);
+        LOG_DEBUG("codec codec:%d\n", out_stream->codec->codec);
+        LOG_DEBUG("codec codec_type:%d\n", out_stream->codec->codec_type);
+        LOG_DEBUG("codec codec_tag:%d\n", out_stream->codec->codec_tag);
+        LOG_DEBUG("codec stream_codec_tag:%d\n", out_stream->codec->stream_codec_tag);
+        LOG_DEBUG("codec av_class:%s\n", out_stream->codec->av_class->class_name);
     }
-    av_dump_format(obj->output_ctx, 0, obj->params.output_url, 1);
 
 
-
-    if (avio_open(&obj->output_ctx->pb, obj->params.output_url, AVIO_FLAG_READ_WRITE) < 0){
-        LOG_ERROR("open output file:%s error.\n", obj->params.output_url);
-        return -1;
+    // copy the metadata
+    AVDictionaryEntry *t = NULL;
+    while ((t = av_dict_get(obj->input_ctx->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
+        LOG_DEBUG("metadata: %s=%s.\n", t->key, t->value);
+        av_dict_set(&obj->output_ctx->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
     }
+
 
     // if slice mode need encode, should open the decoder and encoder
     if(obj->params.slice_mode == SLICER_MODE_ENCODE_ONLY || obj->params.slice_mode == SLICER_MODE_ENCODE_COPY_ENCODE){
         LOG_DEBUG("slice mode need encode, to open the encoder.\n");
-
         // open the encoder
-
-
     }else{
         LOG_DEBUG("slice mode no need encode, just copy it.\n");
+    }
+
+
+    av_dump_format(obj->output_ctx, 0, obj->params.output_url, 1);
+
+    if (avio_open(&obj->output_ctx->pb, obj->params.output_url, AVIO_FLAG_WRITE) < 0){
+        LOG_ERROR("open output file:%s error.\n", obj->params.output_url);
+        return -1;
+    }
+
+    ret = avformat_write_header(obj->output_ctx, NULL);
+    if( ret < 0){
+        LOG_ERROR("output_ctx av_write_header error, ret=%d!\n", ret);
+        return ret;
     }
 
     return 0;
@@ -247,6 +328,11 @@ static int Slicer_open_output_media(Slicer_t *obj)
 /** init the slicer **/
 static int Slicer_init(Slicer_t *obj, Slicer_Params_t * params)
 {
+
+    // init object
+    memset(obj, 0, sizeof(Slicer_t));
+    INIT_LIST_HEAD(&obj->packets_queue_head);
+
 
     // simple check the input args
     if(obj == NULL){
@@ -257,6 +343,7 @@ static int Slicer_init(Slicer_t *obj, Slicer_Params_t * params)
         LOG_ERROR("Slicer_init input arg: params is NULL\n");
         return -1;
     }
+
 
     /** get default params **/
     Slicer_params_default(&obj->params);
@@ -325,12 +412,344 @@ static int Slicer_init(Slicer_t *obj, Slicer_Params_t * params)
 
     LOG_DEBUG("To open the input media ok.\n");
 
-    // open the output media
+    /** open the output media **/
     if(Slicer_open_output_media(obj) < 0){
         LOG_ERROR("open the output media error.\n");
         return -1;
     }
 
+    /** init the times, use AV_TIME_BASE=1000000 **/
+    obj->slice_start_time = obj->params.start_time * 1000;
+    obj->slice_end_time   = obj->params.end_time * 1000; 
+
+
+    return 0;
+}
+
+
+static int Slicer_seek_start_time_key_frame(Slicer_t *obj)
+{
+    int ret ;
+
+    // seek the start time, AV_TIME_BASE=1000000 
+    ret = av_seek_frame(obj->input_ctx, -1, obj->slice_start_time, AVSEEK_FLAG_BACKWARD);
+    if (ret < 0) {
+        LOG_ERROR("could not seek position %lld\n", obj->slice_start_time);
+        return -1;
+    }
+    LOG_DEBUG("Success to seek position %lld\n", obj->slice_start_time);
+
+    return 0;
+}
+
+static int Slicer_slice_copy_only(Slicer_t *obj)
+{
+
+    // seek to start time key frame
+    if (Slicer_seek_start_time_key_frame(obj) < 0){
+        LOG_ERROR("Slicer_seek_start_time_key_frame error.\n");
+        return -1;
+    }
+
+    int ret;
+    AVPacket pkt;
+    int64_t first_video_key_frame_pts = 0;
+    int64_t first_video_key_frame_dts = 0;
+
+    int64_t slice_end_time = obj->slice_end_time;
+
+    // get input stream timebase
+    int input_timebase_num;
+    int input_timebase_den;
+
+    while(1){
+        // read frame
+        ret = av_read_frame(obj->input_ctx, &pkt);
+        if (ret == AVERROR(EAGAIN)){
+            LOG_INFO("av_read_frame ret=%d, EAGAIN means try again.\n", ret);
+            continue;
+        }
+
+        if (ret == AVERROR_EOF){
+            LOG_INFO("av_read_frame ret=AVERROR_EOF, break.\n");
+            break;
+        }
+
+        if (ret < 0){
+            LOG_INFO("av_read_frame ret=%d, break.\n", ret);
+            break;
+        }        
+
+        // get the first video key frame to start
+        if (first_video_key_frame_pts == 0){
+
+            // if the pkt is video and is key frame
+            if ( (obj->output_ctx->streams[pkt.stream_index]->codec->codec_type == AVMEDIA_TYPE_VIDEO) && (pkt.flags & AV_PKT_FLAG_KEY)){
+                LOG_INFO("Get the first video key frame, dts: %lld ,pts: %lld\n", pkt.dts, pkt.pts);
+                first_video_key_frame_pts = pkt.pts;
+                first_video_key_frame_dts = pkt.dts;
+
+                slice_end_time = av_rescale_q_rnd(slice_end_time, AV_TIME_BASE_Q, obj->output_ctx->streams[pkt.stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+                LOG_INFO("first_video_key_frame_pts: %lld\n", first_video_key_frame_pts);
+                LOG_INFO("first_video_key_frame_dts: %lld\n", first_video_key_frame_dts);
+                LOG_INFO("slice_end_time: %lld\n", slice_end_time);
+
+            }else{
+                LOG_DEBUG("Not first video key frame, codec_type:%d, dkt:%lld, pts:%lld.\n", obj->output_ctx->streams[pkt.stream_index]->codec->codec_type, pkt.dts, pkt.pts);
+            }
+        }
+
+        if ( first_video_key_frame_pts != 0 ) {
+
+            // rebuild the timestamp
+            pkt.pts = av_rescale_q_rnd(pkt.pts, obj->input_ctx->streams[pkt.stream_index]->time_base, obj->output_ctx->streams[pkt.stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+            pkt.dts = av_rescale_q_rnd(pkt.dts, obj->input_ctx->streams[pkt.stream_index]->time_base, obj->output_ctx->streams[pkt.stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+            pkt.duration = av_rescale_q(pkt.duration, obj->input_ctx->streams[pkt.stream_index]->time_base, obj->output_ctx->streams[pkt.stream_index]->time_base);
+            pkt.pos = -1;
+
+            // check the end time 
+            if( (obj->output_ctx->streams[pkt.stream_index]->codec->codec_type == AVMEDIA_TYPE_VIDEO) && pkt.pts > slice_end_time){
+                LOG_INFO("reach the slice_end_time: %lld, pts: %lld\n", slice_end_time, pkt.pts);
+                break;
+            }
+
+            // write frame
+            ret = av_interleaved_write_frame(obj->output_ctx, &pkt);
+            if (ret < 0) {
+                LOG_ERROR("av_interleaved_write_frame error\n");
+                break;
+            }
+
+
+        }
+
+        // free the frame
+        av_free_packet(&pkt);
+    }
+
+    av_write_trailer(obj->output_ctx);
+
+    return 0;
+}
+
+
+static int Slicer_slice_encode_only(Slicer_t *obj)
+{
+
+    // seek to start frame
+
+    // read frame
+
+    // decode video frame
+
+    // encode video frame
+
+    // write frame
+
+    return 0;
+}
+
+
+
+/***
+    Read a group of frames, and check it if or not the start group or end group.
+    @group_type:    0 , means normal group
+                    1 , means start group
+                    2 , means end group
+
+***/
+static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_type)
+{
+    if (packets_queue == NULL){
+        LOG_ERROR("packets_queue is NULL.\n");
+        return -1;
+    }
+
+    if (group_type == NULL){
+        LOG_ERROR("group_type is NULL.\n");
+        return -1;
+    }
+
+    // init args
+    INIT_LIST_HEAD(packets_queue);
+    *group_type = 0;
+
+
+
+    int i;
+    int ret;
+    Slicer_Packet_t * spkt = NULL;
+    int video_key_frame_number = 0;   // the video key frame number of tmp queue
+    int out_queue_has_video_key = 0;  // the video key frame number in out queue
+
+
+
+    // get packets which in queue
+    while(obj->packets_queue_head.next != &obj->packets_queue_head){
+        spkt = obj->packets_queue_head.next;
+        // delete from queue
+        list_del(spkt);
+        // add to new queue
+        list_add_tail(spkt, packets_queue);
+
+        if(spkt->packet.flags & AV_PKT_FLAG_KEY){
+            video_key_frame_number += 1;
+            out_queue_has_video_key += 1;
+        }
+
+        spkt = NULL;
+    }
+
+
+    int media_end_of_file = 0;
+
+    // read packets
+    spkt = NULL;
+    while(1){
+        // 
+        if (video_key_frame_number > 1){
+            LOG_DEBUG("video_key_frame_number(%d) > 1, break.\n", video_key_frame_number);
+            break;
+        }
+
+        // malloc packet element for queue
+        if (spkt == NULL){
+            spkt = (Slicer_Packet_t *)malloc(sizeof(Slicer_Packet_t));
+            if (spkt == NULL){
+                LOG_ERROR("malloc Slicer_Packet_t error, return is NULL.\n");
+                return -1;
+            }
+            memset(spkt, 0, sizeof(Slicer_Packet_t));
+        }
+
+        // read frame
+        ret = av_read_frame(obj->input_ctx, &spkt->packet);
+        if (ret == AVERROR(EAGAIN)){
+            LOG_INFO("av_read_frame ret=%d, EAGAIN means try again.\n", ret);
+            continue;
+        }
+
+        if (ret == AVERROR_EOF){
+            LOG_INFO("av_read_frame ret=AVERROR_EOF, break.\n");
+            free(spkt);
+            media_end_of_file = 1;
+            break;
+        }
+
+        if (ret < 0){
+            LOG_INFO("av_read_frame ret=%d, break.\n", ret);
+            free(spkt);
+            media_end_of_file = 1;
+            break;
+        }   
+
+        if( (spkt->packet.flags & AV_PKT_FLAG_KEY)  && (obj->first_video_stream_index == spkt->packet.stream_index) ){
+            video_key_frame_number += 1;
+        }
+
+        // add to packets_queue_head
+        list_add_tail(spkt, &obj->packets_queue_head);
+
+
+
+        spkt = NULL;
+    }
+
+    // get packets which in tmp queue
+    while(obj->packets_queue_head.next != &obj->packets_queue_head){
+        spkt = obj->packets_queue_head.next;
+        // until video key frame
+        if( (spkt->packet.flags & AV_PKT_FLAG_KEY) && (obj->first_video_stream_index == spkt->packet.stream_index) && (out_queue_has_video_key > 0) ){
+            LOG_DEBUG(" break.\n");
+            break;
+        }
+
+        // delete from queue
+        list_del(spkt);
+        // add to new queue 
+        list_add_tail(spkt, packets_queue);
+
+        // check the packet if or not the video key frame
+        if ((spkt->packet.flags & AV_PKT_FLAG_KEY) && (obj->first_video_stream_index == spkt->packet.stream_index)){
+            out_queue_has_video_key += 1;
+        }
+
+        spkt = NULL;
+    }
+
+
+    // set group type
+    if (obj->packets_group_count == 0){
+        *group_type = 1;
+        obj->packets_group_count = 1;
+
+    }else if(media_end_of_file){
+        obj->packets_group_count += 1;
+        *group_type = 2;
+    }else{
+        obj->packets_group_count += 1;
+        *group_type = 0;
+    }
+
+    return 0;
+}
+
+static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
+{
+
+    // seek to start time key frame
+    if (Slicer_seek_start_time_key_frame(obj) < 0){
+        LOG_ERROR("Slicer_seek_start_time_key_frame error.\n");
+        return -1;
+    }
+
+    int ret;
+    int group_type = 0;
+    list_t packets_queue;
+    Slicer_Packet_t * spkt = NULL;
+
+
+    // for test, to get the video and audio packet number in one group
+    int video_packets_number = 0;
+    int audio_packets_number = 0;
+    while(1){
+        // read a gop, and to check if start or end gop. (start or end gop need transcode)
+        ret = Slicer_read_group(obj, &packets_queue, &group_type);
+        LOG_DEBUG("Slicer_read_group ret:%d, group_type:%d \n", ret, group_type);
+
+        if(packets_queue.next == &packets_queue){
+            LOG_INFO("not get packet group, break.\n");
+            break;
+        }
+
+        // for test, to get the video and audio packet number in one group
+        int video_packets_number = 0;
+        int audio_packets_number = 0;
+        
+        while(packets_queue.next != &packets_queue){
+            //LOG_DEBUG("Slicer_slice_encode_copy_encode test line\n");
+
+            spkt = packets_queue.next;
+            if( (spkt->packet.flags & AV_PKT_FLAG_KEY) && (obj->first_video_stream_index == spkt->packet.stream_index))
+                LOG_DEBUG("get packet: stream_index:%d, pts:%lld \n", spkt->packet.stream_index, spkt->packet.pts);
+
+            list_del(spkt);
+
+            free(spkt);
+
+        }
+
+        // transcode start or end gop
+
+        // write frame
+
+
+        // if the last group , break
+        if(group_type == 2){
+            LOG_INFO("this is the last group, break.\n");
+            break;
+        }
+    }
     return 0;
 }
 
@@ -341,777 +760,48 @@ int Slicer(Slicer_Params_t * params)
 
     memset(&slicer, 0, sizeof(Slicer_t));
 
+    if(Slicer_init(&slicer, params) < 0){
+        LOG_ERROR("Slicer_init error.\n");
+        return -1;
+    }
 
-    Slicer_init(&slicer, params);
 
     // do slice
-
-    // read frame
-
-    // decode video frame
-
-    // encode video frame
-
-    // write frame
-
-
-    return 0;
-}
-
-
-static int decode_video_packet(AVCodecContext * ctx, AVPacket * packet,  AVFrame * picture, int * got_frame)
-{
-    //LOG_DEBUG("[debug] decode video pkt.\n");
-    avcodec_get_frame_defaults(picture);
-
-
-    int got_picture;
-
-    *got_frame = 0;
-
-    int ret = avcodec_decode_video2(ctx, picture, &got_picture, packet);
-    if (ret < 0) {
-        LOG_DEBUG("[error] video frame decode error for pkt: %"PRId64" \n", packet->pts);
-        return -1;
-    }
-
-    int64_t pts = 0;
-    if (picture->opaque && *(int64_t*) picture->opaque != AV_NOPTS_VALUE) {
-        pts = *(int64_t *) picture->opaque;
-    }
-
-    if(!got_picture){
-        LOG_DEBUG("[warnning] no picture gotten.\n");
-        return -1;
-    }else{
-        *got_frame = 1;
-        //picture->pts = pts;
-        picture->pts = picture->pkt_pts;
-        picture->pict_type = 0;
-        LOG_DEBUG("[debug] got video pic, type:%d, pts:%"PRId64", pkt_pts:%"PRId64", pkt_dts:%"PRId64". \n", 
-            picture->pict_type, picture->pts, picture->pkt_pts, picture->pkt_dts);
-
-    }
-
-    return 0;
-}
-
-
-static void flush_video_frames(AVFormatContext * outctx, AVCodecContext  * outVideoCodecCtx,
-                                int input_video_stream_index, int frist_video_packet_dts, int video_should_interval)
-{
-
-    int ret = 0;
-    int got_encode_frame = 0;
-    AVPacket pkt; 
-
-
-    // encode the picture
-    av_init_packet(&pkt);
-    pkt.data = NULL;
-    pkt.size = 0;
-
-
-    while(1){
-        ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, NULL, &got_encode_frame);
-        //if(ret < 0 || got_encode_frame ==0 ){
-        if(ret < 0){
-            LOG_DEBUG("[error] encode picture error. return:%d\n", ret);
-            break;
-        }
-        
-        if(got_encode_frame){
-            // write the pkt to stream
-            pkt.stream_index = input_video_stream_index;
-            pkt.dts = pkt.dts - frist_video_packet_dts;
-            pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
-            //LOG_DEBUG("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
-            ret = av_interleaved_write_frame(outctx, &pkt);
-            if (ret < 0) {
-                LOG_DEBUG("[error] Could not write frame of stream: %d\n", ret);
-                break;
-            }
-        }else{
+    switch(slicer.params.slice_mode){
+        case SLICER_MODE_ENCODE_ONLY:
+            LOG_INFO("do slice encode only.\n");
 
             break;
-        }
-    }
+        case SLICER_MODE_COPY_ONLY:
+            LOG_INFO("do slice copy only.\n");
 
-}
-
-
-/*
-    Function: slicer
-    Input:  
-        src : source file path
-        starttime: the start time of the stream which you want to get. unit is ms, e.g. 4000 means 4 s.
-        endtime  : the end   time of the stream which you want to get. unit is ms, e.g. 4000 means 4 s.  
-        dest_path: the dest file path
-        mode: slicer mode(0:encode, 1:copy, 2:encode and copy)
-
-    Return:
-        0 : means ok
-        not 0 : means error
-*/
-int slicer2(char * src, int starttime, int endtime, char * dest_path, int mode)
-{
-    int ret;
-    int i;
-
-    AVFormatContext * inctx = NULL;
-    int input_video_stream_index = -1;
-    int input_audio_stream_index = -1;
-    AVCodecContext  * inVideoCodecCtx = NULL;
-    int inWidth  = 0;
-    int inHeight = 0;
-    AVCodec * inViedeCodec = NULL;
-    int input_video_timebase_num  = 0;
-    int input_video_timebase_den  = 0;
-    int input_video_stream_timebase_num  = 0;
-    int input_video_stream_timebase_den  = 0;
-    int input_video_ticks_per_frame = 1;
-    int input_fps_num = 1;
-    int input_fps_den = 1;
-    int starttime_by_timebase;    // end time in video timebase
-    int jietime_by_timebase;    // end time in video timebase
-    AVFrame picture;
-    int got_frame = 0;
-
-    AVFormatContext * outctx = NULL;
-    AVOutputFormat  * fmt = NULL;  // output format
-    AVStream        * video_st = NULL;    // output stream
-    AVStream        * audio_st = NULL;    // output stream
-    AVCodecContext  * outVideoCodecCtx = NULL;  // video encode codec ctx
-    AVCodecContext  * outAudioCodecCtx = NULL;
-    AVCodec * outViedeCodec = NULL;
-    int got_encode_frame = 0;
-
-    AVPacket pkt; 
-    int not_get_decode_frame = 0;
-    int64_t frist_video_packet_dts = 0;
-    int64_t frist_audio_packet_dts = 0;
-    int have_found_start_frame = 0;
-    int have_found_end_frame = 0;
-    int stream_gop_cnt = 0;
-    int reset_stream_ctx_before_copy = 0;
-    int reset_stream_ctx_before_end  = 0;
-
-    if(src == NULL || dest_path == NULL){
-        LOG_DEBUG("[error]: jietu input params NULL.\n");
-        return -1;
-    }
-
-    if(starttime <= 0){
-        LOG_DEBUG("[warning] starttime <= 0, modify it to 0.\n");
-        starttime = 0;
-    }
-    LOG_DEBUG("[debug] starttime=%d\n", starttime);
-
-
-
-    av_register_all();
-
-    //// open the input file
-    ret = avformat_open_input(&inctx, src, NULL, NULL);
-    if (ret < 0 || inctx == NULL) {
-        LOG_DEBUG("[error] error open stream: '%s', error code: %d \n", src, ret);
-        return -1;
-    }
-
-    ret = avformat_find_stream_info(inctx, NULL);
-    if (ret < 0) {
-        LOG_DEBUG("[error] could not find stream info.\n");
-        return -1;
-    }
-
-    inctx->flags |= AVFMT_FLAG_GENPTS;
-    av_dump_format(inctx, 0, inctx->filename, 0);
-
-    // find the video stream
-    input_video_stream_index = -1;
-    for (i = 0; i < inctx->nb_streams; i++) {
-        if (input_video_stream_index == -1 && inctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
-            input_video_stream_index = i;
-            inWidth  = inctx->streams[i]->codec->width;
-            inHeight = inctx->streams[i]->codec->height;
-            input_video_timebase_num = inctx->streams[i]->codec->time_base.num;
-            input_video_timebase_den = inctx->streams[i]->codec->time_base.den;  // should not be 0
-            input_video_stream_timebase_num = inctx->streams[i]->time_base.num;
-            input_video_stream_timebase_den = inctx->streams[i]->time_base.den;  // should not be 0
-            input_video_ticks_per_frame = inctx->streams[i]->codec->ticks_per_frame;
-
-            LOG_DEBUG("[debug] w:%d, h:%d, timebase.num:%d, timebase.den:%d, stream_timebase.num:%d, stream_timebase.den:%d, ticks_per_frame:%d\n", 
-                inWidth, inHeight, input_video_timebase_num, input_video_timebase_den, 
-                input_video_stream_timebase_num, input_video_stream_timebase_den, input_video_ticks_per_frame);
-
-            // trans jietime to video stream timebase.
-            if(input_video_stream_timebase_num <= 0 || input_video_stream_timebase_den <= 0){
-                LOG_DEBUG("[error] get input_video_stream_timebase error.\n");
+            if(Slicer_slice_copy_only(&slicer) < 0){
+                LOG_ERROR("Slicer_slice_copy_only error.\n");
                 return -1;
             }
-            jietime_by_timebase = (endtime*input_video_stream_timebase_den/input_video_stream_timebase_num)/1000;
-            starttime_by_timebase = (starttime*input_video_stream_timebase_den/input_video_stream_timebase_num)/1000;
 
-            // get fps
-            input_fps_den = inctx->streams[i]->r_frame_rate.den;
-            input_fps_num = inctx->streams[i]->r_frame_rate.num;
-
-            LOG_DEBUG("[debug] input video fps %d/%d\n", input_fps_num, input_fps_den);
-            
-        }
-        if(input_audio_stream_index == -1 && inctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO){
-
-            input_audio_stream_index = i;
-            LOG_DEBUG("[debug] input_audio_stream_index=%d\n", input_audio_stream_index);
-        }
-    }
-
-    if(input_video_stream_index == -1){
-        LOG_DEBUG("[error] not found video stream.\n");
-        return -1;
-    }
-
-      
-    //// fix me: decode is too slow, not use yet
-    // open input video decodec
-    inViedeCodec = avcodec_find_decoder(inctx->streams[input_video_stream_index]->codec->codec_id);
-    if(inViedeCodec == NULL){
-        LOG_DEBUG("[error] inViedeCodec %d not found !\n", inctx->streams[input_video_stream_index]->codec->codec_id);
-        return -1;
-    }else{
-        // open it 
-        LOG_DEBUG("[debug] open video decodec codec, id:%d, name:%s\n",inctx->streams[input_video_stream_index]->codec->codec_id, 
-            inViedeCodec->name);
-        
-        ret = avcodec_open2(inctx->streams[input_video_stream_index]->codec, inViedeCodec, NULL);
-        if (ret < 0) {
-            LOG_DEBUG("[error] could not open video decode codec\n");
-            return -1;
-        }
-    }
-    
-
-    //// open the output file
-    outctx = avformat_alloc_context();
-
-    
-    if(strncmp(inctx->iformat->name, "ts", sizeof("ts")) == 0){
-        fmt = av_guess_format("mpegts", NULL, NULL);
-    } else if(strncmp(inctx->iformat->name, "flv", sizeof("flv")) == 0){
-        fmt = av_guess_format("flv", NULL, NULL);
-    } else {
-        fmt = av_guess_format("mp4", NULL, NULL);
-    }
-    if (!fmt) {
-        LOG_DEBUG("Could not find %s format", inctx->iformat->name);
-        return -1;
-    }
-
-    outctx->oformat = fmt;  
-
-    if (avio_open(&outctx->pb, dest_path, AVIO_FLAG_READ_WRITE) < 0){
-        LOG_DEBUG("[error] open output file.\n");
-        return -1;
-    }
-
-
-
-    int video_extra_size;
-    char * video_extradata = NULL;
-    int audio_extra_size;
-
-    // add video stream
-    if(input_video_stream_index != -1){
-        video_st = av_new_stream(outctx, outctx->nb_streams);
-        if (video_st==NULL){
-            LOG_DEBUG("[error] av_new_stream error.\n");
-            return -1;
-        }
-    }
-    //AVMetadataTag *t = NULL;
-    //while ((t = av_metadata_get(ctx->metadata, "", t, AV_METADATA_IGNORE_SUFFIX)))
-    //    av_metadata_set2(&outctx->metadata, t->key, t->value, AV_METADATA_DONT_OVERWRITE);
-    AVDictionaryEntry *t = NULL;
-    while ((t = av_dict_get(inctx->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
-        //LOG_DEBUG("metadata: %s=%s.\n", t->key, t->value);
-        av_dict_set(&outctx->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
-    }
-
-    if(video_st != NULL){
-
-        video_st->time_base = inctx->streams[input_video_stream_index]->time_base;
-        avcodec_get_context_defaults3(video_st->codec, NULL);
-        outVideoCodecCtx = video_st->codec;
-
-        outVideoCodecCtx->codec_id = inctx->streams[input_video_stream_index]->codec->codec_id;
-        outVideoCodecCtx->codec_type = inctx->streams[input_video_stream_index]->codec->codec_type;
-        /*
-        (!outVideoCodecCtx->codec_tag){
-                if( !outctx->oformat->codec_tag
-                   || av_codec_get_id (outctx->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_tag) == outVideoCodecCtx->codec_id
-                   || av_codec_get_tag(outctx->oformat->codec_tag, inctx->streams[input_video_stream_index]->codec->codec_id) <= 0)
-                    outVideoCodecCtx->codec_tag = inctx->streams[i]->codec->codec_tag;
-        }
-        */
-        outVideoCodecCtx->bit_rate = inctx->streams[input_video_stream_index]->codec->bit_rate;
-        outVideoCodecCtx->bit_rate_tolerance = inctx->streams[input_video_stream_index]->codec->bit_rate_tolerance;
-
-        outVideoCodecCtx->rc_buffer_size = inctx->streams[input_video_stream_index]->codec->rc_buffer_size;
-        outVideoCodecCtx->pix_fmt = inctx->streams[input_video_stream_index]->codec->pix_fmt;
-
-        if(inctx->streams[input_video_stream_index]->codec->ticks_per_frame > 0)
-            outVideoCodecCtx->time_base.den = inctx->streams[input_video_stream_index]->codec->time_base.den / inctx->streams[input_video_stream_index]->codec->ticks_per_frame;  
-        else
-            outVideoCodecCtx->time_base.den = inctx->streams[input_video_stream_index]->codec->time_base.den;
-
-        outVideoCodecCtx->time_base.num = inctx->streams[input_video_stream_index]->codec->time_base.num;  
-
-
-        outVideoCodecCtx->width = inctx->streams[input_video_stream_index]->codec->width;
-        outVideoCodecCtx->height = inctx->streams[input_video_stream_index]->codec->height;
-        LOG_DEBUG("width:%d, height:%d\n", outVideoCodecCtx->width, outVideoCodecCtx->height);
-
-        outVideoCodecCtx->has_b_frames = inctx->streams[input_video_stream_index]->codec->has_b_frames;
-        
-        outVideoCodecCtx->me_range  = inctx->streams[input_video_stream_index]->codec->me_range;
-        if(outVideoCodecCtx->me_range == 0){
-            outVideoCodecCtx->me_range = 16;
-        }
-        LOG_DEBUG("me_range:%d\n", outVideoCodecCtx->me_range);
-        
-        
-        outVideoCodecCtx->max_qdiff = inctx->streams[input_video_stream_index]->codec->max_qdiff;
-        LOG_DEBUG("max_qdiff:%d\n", outVideoCodecCtx->max_qdiff);
-        
-        outVideoCodecCtx->qmin      = inctx->streams[input_video_stream_index]->codec->qmin;
-        LOG_DEBUG("qmin:%d\n", outVideoCodecCtx->qmin);
-        outVideoCodecCtx->qmax      = inctx->streams[input_video_stream_index]->codec->qmax;
-        LOG_DEBUG("qmax:%d\n", outVideoCodecCtx->qmax);
-        
-        //outVideoCodecCtx->qcompress = inctx->streams[input_video_stream_index]->codec->qcompress;
-        outVideoCodecCtx->qcompress = 0.6;
-        LOG_DEBUG("qcompress:%f\n", outVideoCodecCtx->qcompress);
-        
-        
-        //if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
-        //    outVideoCodecCtx->flags |= CODEC_FLAG_GLOBAL_HEADER;
-
-        //LOG_DEBUG("[debug] enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
-        //print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
-
-        //video_extra_size = inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
-        //outVideoCodecCtx->extradata = av_mallocz(video_extra_size);
-        //memcpy(outVideoCodecCtx->extradata, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
-        //outVideoCodecCtx->extradata_size = inctx->streams[input_video_stream_index]->codec->extradata_size;
-
-        //LOG_DEBUG("[debug] enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
-        //print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
-        
-
-        while ((t = av_dict_get(inctx->streams[input_video_stream_index]->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
-            LOG_DEBUG("stream metadata: %s=%s.\n", t->key, t->value);
-            av_dict_set(&video_st->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
-        }
-
-         
-    }
-
-    // add audio stream
-    if(input_audio_stream_index != -1){
-        audio_st = av_new_stream(outctx, outctx->nb_streams);
-        if (audio_st==NULL){
-            LOG_DEBUG("[error] av_new_stream error.\n");
-            return -1;
-        }
-    }
-    //AVMetadataTag *t = NULL;
-    //while ((t = av_metadata_get(ctx->metadata, "", t, AV_METADATA_IGNORE_SUFFIX)))
-    //    av_metadata_set2(&outctx->metadata, t->key, t->value, AV_METADATA_DONT_OVERWRITE);
-
-    if(audio_st != NULL){
-
-        audio_st->time_base = inctx->streams[input_audio_stream_index]->time_base;
-        avcodec_get_context_defaults3(audio_st->codec, NULL);
-        outAudioCodecCtx = audio_st->codec;
-
-        outAudioCodecCtx->codec_id = inctx->streams[input_audio_stream_index]->codec->codec_id;
-        outAudioCodecCtx->codec_type = inctx->streams[input_audio_stream_index]->codec->codec_type;
-
-        outAudioCodecCtx->bit_rate = inctx->streams[input_audio_stream_index]->codec->bit_rate;
-        outAudioCodecCtx->bit_rate_tolerance = inctx->streams[input_audio_stream_index]->codec->bit_rate_tolerance;
-
-        outAudioCodecCtx->rc_buffer_size = inctx->streams[input_audio_stream_index]->codec->rc_buffer_size;
-        //outAudioCodecCtx->pix_fmt = inctx->streams[input_audio_stream_index]->codec->pix_fmt;
-        outAudioCodecCtx->time_base = inctx->streams[input_audio_stream_index]->codec->time_base;  
-
-        outAudioCodecCtx->sample_fmt = inctx->streams[input_audio_stream_index]->codec->sample_fmt; 
-        outAudioCodecCtx->sample_rate = inctx->streams[input_audio_stream_index]->codec->sample_rate; 
-        outAudioCodecCtx->channels = inctx->streams[input_audio_stream_index]->codec->channels; 
-
-
-        if(outctx->oformat->flags & AVFMT_GLOBALHEADER)
-            outAudioCodecCtx->flags |= CODEC_FLAG_GLOBAL_HEADER;
-
-        audio_extra_size = inctx->streams[input_audio_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
-        outAudioCodecCtx->extradata = av_mallocz(audio_extra_size);
-        memcpy(outAudioCodecCtx->extradata, inctx->streams[input_audio_stream_index]->codec->extradata, inctx->streams[input_audio_stream_index]->codec->extradata_size);
-        outAudioCodecCtx->extradata_size = inctx->streams[input_audio_stream_index]->codec->extradata_size;
-    }
-     
-
-    
-    //// fix me: encode video is too slow, not use yet
-    // open the output encoder
-    outViedeCodec = avcodec_find_encoder(outVideoCodecCtx->codec_id);
-    if(outViedeCodec == NULL){
-        LOG_DEBUG("[error] outViedeCodec %d not found !\n", outVideoCodecCtx->codec_id);
-        return -1;
-    }else{
-        // open it 
-        LOG_DEBUG("[debug] open video encodec codec, id:%d, name:%s\n",outVideoCodecCtx->codec_id, outViedeCodec->name);
-        AVDictionary *video_encoder_options = NULL;
-        if(outVideoCodecCtx->codec_id == AV_CODEC_ID_H264){
-             av_dict_set(&video_encoder_options, "x264-params", "sps-id=2", 0);   
-        }
-    
-        ret = avcodec_open2(outVideoCodecCtx, outViedeCodec, video_encoder_options);
-        if (ret < 0) {
-            LOG_DEBUG("[error] could not open video encode codec\n");
-            return -1;
-        }
-
-        LOG_DEBUG("[debug] after open, enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
-        print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
-
-
-        AVIOContext *pb = NULL;
-        char *buf = NULL;
-        int size = 0;
-        
-        ret = avio_open_dyn_buf(&pb);
-        if (ret < 0)
-            return ret;
-        
-        ff_isom_write_avcc(pb, outVideoCodecCtx->extradata, outVideoCodecCtx->extradata_size);
-        size = avio_close_dyn_buf(pb, &buf);
-        
-        //video_extra_size = outVideoCodecCtx->extradata_size + inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
-        //video_extradata  = av_mallocz(video_extra_size);
-        //memcpy(video_extradata, outVideoCodecCtx->extradata, outVideoCodecCtx->extradata_size);
-        //memcpy(video_extradata+outVideoCodecCtx->extradata_size, inctx->streams[input_video_stream_index]->codec->extradata, inctx->streams[input_video_stream_index]->codec->extradata_size);
-
-        video_extra_size = size + inctx->streams[input_video_stream_index]->codec->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
-        video_extradata  = av_mallocz(video_extra_size);
-
-        memcpy(video_extradata, buf, size);
-        memcpy(video_extradata+size, outVideoCodecCtx->extradata, outVideoCodecCtx->extradata_size);
-
-
-        outVideoCodecCtx->extradata_size = size + inctx->streams[input_video_stream_index]->codec->extradata_size;
-        outVideoCodecCtx->extradata = video_extradata;
-        LOG_DEBUG("[debug] after open rebuild, enc extra_size=%d\n", outVideoCodecCtx->extradata_size);
-        print_hex(outVideoCodecCtx->extradata,outVideoCodecCtx->extradata_size);
-
-        
-    }
-    
-    av_dump_format(outctx, 0, dest_path, 1); 
-
-    if(avformat_write_header(outctx, NULL)){
-        LOG_DEBUG("[error] outctx av_write_header error!\n");
-        return -1;
-    }
-    
-
-    // seek the jietu time, AV_TIME_BASE=1000000 
-    ret = av_seek_frame(inctx, -1, starttime*1000, AVSEEK_FLAG_BACKWARD);
-    if (ret < 0) {
-        LOG_DEBUG("[error] could not seek to position %d\n", starttime);
-        return -1;
-    }
-
-    // get the input stream video should interval, interval=timebase/framerate, e.g. 1000/25=40ms
-    int video_should_interval = 40;
-    if(input_video_timebase_den > 0 && input_video_stream_timebase_den > 0 && input_video_timebase_num > 0 && input_video_stream_timebase_num > 0 && input_video_ticks_per_frame > 0){
-        //video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num)/(input_video_timebase_den/(input_video_timebase_num*input_video_ticks_per_frame));
-        video_should_interval = (input_video_stream_timebase_den/input_video_stream_timebase_num) / (input_fps_num/input_fps_den);
-    }
-    LOG_DEBUG("[debug] video_should_interval=%d, jietime_by_timebase=%d\n", video_should_interval,jietime_by_timebase);
-
-    not_get_decode_frame = 0;
-    have_found_start_frame = 0;
-    have_found_end_frame = 0;
-    stream_gop_cnt = 0;
-    // get the frame
-    while(1){
-        av_init_packet(&pkt);
-        pkt.data = NULL;
-        pkt.size = 0;
-        ret = av_read_frame(inctx, &pkt);  // the file has been seek to the nearest before I key frame.
-        if(ret == AVERROR(EAGAIN)){
-            // EAGAIN means try again
-            LOG_DEBUG("[warning] av_read_frame ret=%d, continue.\n", ret);
-            continue;
-        }
-        if(ret == AVERROR_EOF){
-            LOG_DEBUG("[warning] av_read_frame ret=AVERROR_EOF, break.\n");
             break;
-        }
-        if(ret < 0){
-            LOG_DEBUG("[error] av_read_frame error, ret=%d.\n",ret);
-            return -1;
-        }
+        case SLICER_MODE_ENCODE_COPY_ENCODE:
+            LOG_INFO("do slice encode copy encode.\n");
 
-
-        if (mode == SLICER_MODE_ENCODE_ONLY){
-            
-            if(pkt.stream_index == input_video_stream_index){
-                // video
-                LOG_DEBUG("[debug] video pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
-
-                // if the frame is key frame and is the start frame, then start copy, else to decode the frames until get the start frame.
-                
-                if(!have_found_start_frame){
-                    if((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.pts >= starttime_by_timebase)){
-                        have_found_start_frame = 1;
-                        //frist_video_packet_dts = pkt.dts;
-                    }
-
-                    if(pkt.flags & AV_PKT_FLAG_KEY){
-                        stream_gop_cnt += 1;
-                    }
-                }
-
-                    
-                // decode the video frame
-                ret = decode_video_packet(inctx->streams[input_video_stream_index]->codec, &pkt, &picture, &got_frame);
-                if(ret < 0 || got_frame==0){
-                    LOG_DEBUG("[debug] decode video , but not get frame.\n");
-                    
-                    not_get_decode_frame += 1;
-                    if(not_get_decode_frame > 10){
-                        LOG_DEBUG("[error] long times for not_get_decode_frame:%d\n", not_get_decode_frame);
-                        return -1;
-                    }
-                    continue;
-                }
-
-                LOG_DEBUG("[debug] decode video , picture pts=%d.\n", picture.pts);
-
-                // start when time reach
-                if(picture.pts < starttime_by_timebase){
-                    //LOG_DEBUG("[debug] time not ok , now picture pts=%d, start time:%d.\n", picture.pts, starttime_by_timebase);
-                    continue;
-                }
-
-                if(picture.pts > jietime_by_timebase){
-                    LOG_DEBUG("[debug] reach the end time,  endtime=%d\n", jietime_by_timebase);
-                    flush_video_frames(outctx, outVideoCodecCtx, input_video_stream_index, frist_video_packet_dts, video_should_interval);
-                    break;
-                }
-
-
-                    
-
-                        
-                        
-                // encode the picture
-                av_init_packet(&pkt);
-                pkt.data = NULL;
-                pkt.size = 0;
-                ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, &picture, &got_encode_frame);
-                //if(ret < 0 || got_encode_frame ==0 ){
-                if(ret < 0){
-                    LOG_DEBUG("[error] encode picture error. return:%d\n", ret);
-                    return -1;
-                }
-                
-
-
-                if(got_encode_frame){
-                    // save the first frame pts
-                    if(frist_video_packet_dts == 0){
-                        frist_video_packet_dts = picture.pts;
-                    }
-                    // write the pkt to stream
-                    pkt.stream_index = input_video_stream_index;
-                    pkt.dts = pkt.dts - frist_video_packet_dts;
-                    pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
-                    //LOG_DEBUG("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
-                    ret = av_interleaved_write_frame(outctx, &pkt);
-                    if (ret < 0) {
-                        LOG_DEBUG("[error] Could not write frame of stream: %d\n", ret);
-                        return -1;
-                    }
-                }
-
-            }else if((pkt.stream_index == input_audio_stream_index) && have_found_start_frame){
-                // audio
-                LOG_DEBUG("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
-
-                if(frist_audio_packet_dts == 0){
-                    frist_audio_packet_dts = pkt.dts;
-                }
-                // if audio pkt , write
-                pkt.stream_index = input_audio_stream_index;
-                pkt.dts = pkt.dts - frist_audio_packet_dts;
-                pkt.pts = pkt.pts - frist_audio_packet_dts + 2*video_should_interval;
-                LOG_DEBUG("[debug] audio pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
-                ret = av_interleaved_write_frame(outctx, &pkt);
-                if (ret < 0) {
-                    LOG_DEBUG("[error] Could not write frame of stream: %d\n", ret);
-                    return -1;
-                }
+            if(Slicer_slice_encode_copy_encode(&slicer) < 0){
+                LOG_ERROR("Slicer_slice_encode_copy_encode error.\n");
+                return -1;
             }
 
-
-        }else if (mode == SLICER_MODE_ENCODE_COPY_ENCODE){
-
-            if(pkt.stream_index == input_video_stream_index){
-                LOG_DEBUG("[debug] video pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
-
-                // if the frame is key frame and is the start frame, then start copy, else to decode the frames until get the start frame.
-                
-                if(!have_found_start_frame){
-                    if((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.pts >= starttime_by_timebase)){
-                        have_found_start_frame = 1;
-                        frist_video_packet_dts = pkt.dts;
-                    }
-
-                    if(pkt.flags & AV_PKT_FLAG_KEY){
-                        stream_gop_cnt += 1;
-                    }
-                }
-
-                // if the start frame not the Key frame, transcode the stream from start frame to the next GOP. 
-                if(!have_found_start_frame && stream_gop_cnt <= 1){
-                    //frist_video_packet_dts = pkt.dts;
-                    //continue;
-
-                    // decode the stream until find the start frame
-                    
-                    // decode the video frame
-                    ret = decode_video_packet(inctx->streams[input_video_stream_index]->codec, &pkt, &picture, &got_frame);
-                    if(ret < 0 || got_frame==0){
-                        LOG_DEBUG("[debug] decode video , but not get frame.\n");
-                        
-                        not_get_decode_frame += 1;
-                        if(not_get_decode_frame > 10){
-                            LOG_DEBUG("[error] long times for not_get_decode_frame:%d\n", not_get_decode_frame);
-                            return -1;
-                        }
-                        continue;
-                    }
-
-                    LOG_DEBUG("[debug] decode video , picture pts=%d.\n", picture.pts);
-
-                    // start when time reach
-                    if(picture.pts < starttime_by_timebase){
-                        LOG_DEBUG("[debug] time not ok , now picture pts=%d, start time:%d.\n", picture.pts, starttime_by_timebase);
-                        continue;
-                    }
-
-                    // save the first frame pts
-                    if(frist_video_packet_dts == 0){
-                        frist_video_packet_dts = picture.pts;
-                    }
-                    
-                    // break until next GOP
-                    if(picture.pts < jietime_by_timebase){
-                        //LOG_DEBUG("[debug] get the jietu frame, picture pts: %lld\n", (pkt.dts - video_should_interval*not_get_decode_frame));
-                        
-                        // encode the picture
-                        av_init_packet(&pkt);
-                        pkt.data = NULL;
-                        pkt.size = 0;
-                        ret = avcodec_encode_video2(outVideoCodecCtx, &pkt, &picture, &got_encode_frame);
-                        //if(ret < 0 || got_encode_frame ==0 ){
-                        if(ret < 0){
-                            LOG_DEBUG("[error] encode picture error. return:%d\n", ret);
-                            return -1;
-                        }
-                        
-                        if(got_encode_frame){
-                            // write the pkt to stream
-                            pkt.stream_index = input_video_stream_index;
-                            pkt.dts = pkt.dts - frist_video_packet_dts;
-                            pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
-                            LOG_DEBUG("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
-                            ret = av_interleaved_write_frame(outctx, &pkt);
-                            if (ret < 0) {
-                                LOG_DEBUG("[error] Could not write frame of stream: %d\n", ret);
-                                return -1;
-                            }
-                        }
-
-                    }
-                }
-                else{
-
-                    // copy the frames until end time
-                    if(pkt.dts > jietime_by_timebase){
-                        LOG_DEBUG("[debug] reach the end time, pkt.pts=%d, dts=%d, endtime=%d\n", pkt.pts, pkt.dts, jietime_by_timebase);
-                        break;
-                    }
-                    
-                    // modify the pkt ts
-                    pkt.stream_index = input_video_stream_index;
-                    pkt.dts = pkt.dts - frist_video_packet_dts;
-                    pkt.pts = pkt.pts - frist_video_packet_dts + 2*video_should_interval;
-                    LOG_DEBUG("[debug] video pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
-
-                    
-                    // write the frame 
-                    ret = av_interleaved_write_frame(outctx, &pkt);
-                    if (ret < 0) {
-                        LOG_DEBUG("[error] Could not write frame of stream: %d\n", ret);
-                        return -1;
-                    }  
-
-                
-
-                }
-            
+            break;
+        default:
+            LOG_INFO("do slice use default mode: copy only.\n");
+            if(Slicer_slice_copy_only(&slicer) < 0){
+                LOG_ERROR("Slicer_slice_copy_only error.\n");
+                return -1;
             }
-            else if((pkt.stream_index == input_audio_stream_index) && have_found_start_frame){
-                
-                LOG_DEBUG("[debug] audio pkt dts: %lld ,pts: %lld, is_key:%d \n", pkt.dts, pkt.pts, pkt.flags & AV_PKT_FLAG_KEY);
-
-                if(frist_audio_packet_dts == 0){
-                    frist_audio_packet_dts = pkt.dts;
-                }
-                // if audio pkt , write
-                pkt.stream_index = input_audio_stream_index;
-                pkt.dts = pkt.dts - frist_audio_packet_dts;
-                pkt.pts = pkt.pts - frist_audio_packet_dts + 2*video_should_interval;
-                LOG_DEBUG("[debug] audio pkt write. pts=%lld, dts=%lld\n", pkt.pts, pkt.dts);
-                ret = av_interleaved_write_frame(outctx, &pkt);
-                if (ret < 0) {
-                    LOG_DEBUG("[error] Could not write frame of stream: %d\n", ret);
-                    return -1;
-                }
-            }
-
-        }else{
-            // copy only
-
-        }
-        
-
 
     }
-
-
-    // fix me: need flush the encoder 
-
-    // end of the stream
-    av_write_trailer(outctx);
-
-    // close ctx
-
 
     return 0;
 }
+
 
 
 
@@ -1133,10 +823,11 @@ int main(int argc, char ** argv)
 	//int end_time = atoi(argv[4]);
 
     strcpy(params.input_url, "/root/Meerkats.mp4");
-    strcpy(params.output_url, "out.flv");
-    params.start_time = 10;
-    params.end_time = 30;
-    params.slice_mode = SLICER_MODE_COPY_ONLY;
+    strcpy(params.output_url, "out.mp4");
+    params.start_time = 10000;
+    params.end_time = 30000;
+    //params.slice_mode = SLICER_MODE_COPY_ONLY;
+    params.slice_mode = SLICER_MODE_ENCODE_COPY_ENCODE;
     
     ret = Slicer(&params);
     LOG_DEBUG("slicer return: %d\n", ret);
