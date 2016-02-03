@@ -203,6 +203,7 @@ static int Slicer_open_input_media(Slicer_t *obj)
     }
 
     int ret = 0;
+    int i;
 
     obj->input_ctx = NULL;
     ret = avformat_open_input(&obj->input_ctx, obj->params.input_url, NULL, NULL);
@@ -217,19 +218,38 @@ static int Slicer_open_input_media(Slicer_t *obj)
         return -1;
     }
 
-    //obj->input_ctx->flags |= AVFMT_FLAG_GENPTS;
-    av_dump_format(obj->input_ctx, 0, obj->input_ctx->filename, 0);
+
 
     // if slice mode need encode, should open the decoder and encoder
     if(obj->params.slice_mode == SLICER_MODE_ENCODE_ONLY || obj->params.slice_mode == SLICER_MODE_ENCODE_COPY_ENCODE){
-        LOG_DEBUG("slice mode need encode, to open the decoder.\n");
+        LOG_DEBUG("slice mode need encode, to open the video decoder.\n");
 
-        // open the decoder
+        // open the video decoder
+        for(i = 0; i < obj->input_ctx->nb_streams; i++){
+            // for test
+            LOG_DEBUG(" streams[%d] extradata_size:%d.\n", i, obj->input_ctx->streams[i]->codec->extradata_size);
+            print_hex(obj->input_ctx->streams[i]->codec->extradata, obj->input_ctx->streams[i]->codec->extradata_size);
+
+            if (obj->input_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+                LOG_DEBUG("find streams[%d] is video stream, need to open video codec.\n", i);
+                // open decoder 
+                ret = avcodec_open2(obj->input_ctx->streams[i]->codec, avcodec_find_decoder(obj->input_ctx->streams[i]->codec->codec_id), NULL);
+                if (ret < 0) {
+                    LOG_ERROR("Failed to open decoder for stream #%d\n", i);
+                    return ret;
+                }
+            }
+        }
 
 
     }else{
         LOG_DEBUG("slice mode no need encode, just copy it.\n");
     }
+
+    //obj->input_ctx->flags |= AVFMT_FLAG_GENPTS;
+    av_dump_format(obj->input_ctx, 0, obj->input_ctx->filename, 0);
+
+
 
     return 0;
 }
@@ -289,6 +309,17 @@ static int Slicer_open_output_media(Slicer_t *obj)
         LOG_DEBUG("codec codec_tag:%d\n", out_stream->codec->codec_tag);
         LOG_DEBUG("codec stream_codec_tag:%d\n", out_stream->codec->stream_codec_tag);
         LOG_DEBUG("codec av_class:%s\n", out_stream->codec->av_class->class_name);
+    
+        // if slice mode need encode, should open the video encoder
+        if((in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) && 
+            (obj->params.slice_mode == SLICER_MODE_ENCODE_ONLY || obj->params.slice_mode == SLICER_MODE_ENCODE_COPY_ENCODE)){
+            
+            LOG_DEBUG("slice mode need encode, to open the encoder.\n");
+            // open the encoder
+        }else{
+            LOG_DEBUG("slice mode no need encode, just copy it.\n");
+        }
+
     }
 
 
@@ -297,15 +328,6 @@ static int Slicer_open_output_media(Slicer_t *obj)
     while ((t = av_dict_get(obj->input_ctx->metadata, "", t, AV_DICT_IGNORE_SUFFIX))){
         LOG_DEBUG("metadata: %s=%s.\n", t->key, t->value);
         av_dict_set(&obj->output_ctx->metadata, t->key, t->value, AV_DICT_DONT_OVERWRITE);
-    }
-
-
-    // if slice mode need encode, should open the decoder and encoder
-    if(obj->params.slice_mode == SLICER_MODE_ENCODE_ONLY || obj->params.slice_mode == SLICER_MODE_ENCODE_COPY_ENCODE){
-        LOG_DEBUG("slice mode need encode, to open the encoder.\n");
-        // open the encoder
-    }else{
-        LOG_DEBUG("slice mode no need encode, just copy it.\n");
     }
 
 
