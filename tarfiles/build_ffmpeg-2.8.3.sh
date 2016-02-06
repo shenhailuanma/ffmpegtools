@@ -154,13 +154,17 @@ then
     echo ${ffmpeg_exported_release_dir}/include
     echo ${ffmpeg_exported_release_dir}/lib
 ./configure --prefix=${release_dir} --cc=$CC \
---extra-cflags="-I${ffmpeg_exported_release_dir}/include" --extra-ldflags="-L${ffmpeg_exported_release_dir}/lib -lm" \
+    --extra-cflags="-I${ffmpeg_exported_release_dir}/include" --extra-ldflags="-L${ffmpeg_exported_release_dir}/lib -lm" \
+    --disable-hwaccels \
+    --disable-lzma \
+    --disable-yasm \
+    --disable-devices  \
 --extra-libs=-lpthread --enable-gpl \
 --enable-libx264 \
 --enable-postproc \
 --enable-static --enable-nonfree \
 --enable-version3 --enable-libopencore-amrnb \
---disable-lzma
+--enable-parser=h264
 
 
     echo "ffmpeg2.8.3 begin make"

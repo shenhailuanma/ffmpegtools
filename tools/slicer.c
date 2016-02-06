@@ -63,7 +63,9 @@ static int Glb_Log_Level = 4;
 #define SLICER_MODE_COPY_ONLY               1
 #define SLICER_MODE_ENCODE_COPY_ENCODE      2
 
-#define SLICER_TIME_BASE 
+#define SLICER_GROUP_TYPE_NORMAL            0
+#define SLICER_GROUP_TYPE_START             1
+#define SLICER_GROUP_TYPE_END               2 
 
 
 typedef struct list_head{
@@ -136,6 +138,9 @@ typedef struct {
 
     int first_video_stream_index;
 
+    int64_t first_video_frame_pts;
+    int64_t first_video_frame_dts;
+
 } Slicer_t;
 
 typedef struct Slicer_Packet_t{
@@ -178,9 +183,10 @@ static void print_hex(char * phex, int size)
     if(phex == NULL)
         return;
 
-    while(size>0){
-        printf("%x ", phex[size]);
-        size--;
+    int i = 0;
+    while(i < size){
+        printf("%02x ", (unsigned char)phex[i]);
+        i++;
     }
 
     printf("\n");
@@ -226,12 +232,14 @@ static int Slicer_open_input_media(Slicer_t *obj)
 
         // open the video decoder
         for(i = 0; i < obj->input_ctx->nb_streams; i++){
-            // for test
-            LOG_DEBUG(" streams[%d] extradata_size:%d.\n", i, obj->input_ctx->streams[i]->codec->extradata_size);
-            print_hex(obj->input_ctx->streams[i]->codec->extradata, obj->input_ctx->streams[i]->codec->extradata_size);
+            
 
             if (obj->input_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
                 LOG_DEBUG("find streams[%d] is video stream, need to open video codec.\n", i);
+                // for test
+                LOG_DEBUG(" streams[%d] extradata_size:%d.\n", i, obj->input_ctx->streams[i]->codec->extradata_size);
+                print_hex(obj->input_ctx->streams[i]->codec->extradata, obj->input_ctx->streams[i]->codec->extradata_size);
+
                 // open decoder 
                 ret = avcodec_open2(obj->input_ctx->streams[i]->codec, avcodec_find_decoder(obj->input_ctx->streams[i]->codec->codec_id), NULL);
                 if (ret < 0) {
@@ -254,6 +262,61 @@ static int Slicer_open_input_media(Slicer_t *obj)
     return 0;
 }
 
+
+
+
+static void Slicer_parse_sps(uint8_t * data, int size)
+{
+    //GetBitContext bp;
+
+
+}
+
+
+static void Slicer_print_codec_context(AVCodecContext *ctx)
+{
+    printf("AVCodecContext:  height = %d \n", ctx->width);
+    printf("AVCodecContext:  width = %d \n", ctx->width);
+
+    printf("AVCodecContext:  me_range = %d \n", ctx->me_range);
+    printf("AVCodecContext:  me_subpel_quality = %d \n", ctx->me_subpel_quality);
+    printf("AVCodecContext:  max_qdiff = %d \n", ctx->max_qdiff);
+    printf("AVCodecContext:  qmin = %d \n", ctx->qmin);
+    printf("AVCodecContext:  qmax = %d \n", ctx->qmax);
+    printf("AVCodecContext:  qcompress = %f \n", ctx->qcompress);
+    printf("AVCodecContext:  i_quant_factor = %f \n", ctx->i_quant_factor);
+    printf("AVCodecContext:  b_quant_factor = %f \n", ctx->b_quant_factor);
+    printf("AVCodecContext:  gop_size = %d \n", ctx->gop_size);
+
+}
+
+
+static void Slicer_set_video_encoder_context(AVCodecContext *dest, const AVCodecContext *src)
+{
+    //Slicer_parse_sps(src->extradata, src->extradata_size);
+
+    dest->height = src->height;
+    dest->width = src->width;
+    dest->sample_aspect_ratio = src->sample_aspect_ratio;
+    //dest->pix_fmt = src->pix_fmt;
+    dest->pix_fmt = AV_PIX_FMT_YUV420P;
+    dest->time_base = src->time_base;
+
+
+    dest->codec = NULL;
+    dest->codec_tag = 0;
+
+
+
+    dest->me_range = 16;
+    dest->max_qdiff = 4;
+    dest->gop_size = 250;
+    dest->qmin = 0;
+    dest->qmax = 40;
+    dest->qcompress = 0.6;
+    dest->i_quant_factor = 1.4;
+    dest->b_quant_factor = 1.3;
+}
 
 static int Slicer_open_output_media(Slicer_t *obj)
 {
@@ -280,28 +343,92 @@ static int Slicer_open_output_media(Slicer_t *obj)
     AVStream *out_stream = NULL;
     for (i = 0; i < obj->input_ctx->nb_streams; i++) {
         in_stream  = obj->input_ctx->streams[i];
-        out_stream = avformat_new_stream(obj->output_ctx, in_stream->codec->codec);
-        if (!out_stream) {
-            LOG_ERROR("Failed allocating output stream\n");
-            return -1;
+
+        // if slice mode need encode, should open the video encoder
+        if((in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) && 
+            (obj->params.slice_mode == SLICER_MODE_ENCODE_ONLY || obj->params.slice_mode == SLICER_MODE_ENCODE_COPY_ENCODE)){
+            
+            LOG_DEBUG("slice mode need encode, to open the encoder.\n");
+
+
+            // find the encoder
+            AVCodec *encoder;
+            encoder = avcodec_find_encoder(in_stream->codec->codec_id);
+            if (!encoder) {
+                LOG_ERROR("Necessary encoder not found\n");
+                return -1;
+            }
+            LOG_DEBUG("open the encoder %d ok.\n", in_stream->codec->codec_id);
+
+            out_stream = avformat_new_stream(obj->output_ctx, encoder);
+            //out_stream = avformat_new_stream(obj->output_ctx, NULL);
+
+            LOG_DEBUG("add new stream %d ok.\n", out_stream);
+
+            ret = 0;
+            ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
+            if (ret < 0) {
+                LOG_ERROR("Failed to copy context from input to output stream codec context\n");
+                return -1;
+            }
+
+            // set the video encoder context for open the encoder
+            Slicer_set_video_encoder_context(out_stream->codec, in_stream->codec);
+
+
+            if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER){
+                LOG_DEBUG("AVFMT_GLOBALHEADER is True.\n");
+                out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+            }
+
+            // print for test
+            //Slicer_print_codec_context(out_stream->codec);
+
+            ret = avcodec_open2(out_stream->codec, encoder, NULL);
+            if (ret < 0) {
+                LOG_ERROR("Cannot open video encoder for stream #%u\n", i);
+                return ret;
+            }
+
+            LOG_DEBUG("avcodec_open2 ok.\n");
+
+            LOG_DEBUG("[OUT] streams[%d] extradata_size:%d.\n", i, out_stream->codec->extradata_size);
+            print_hex(out_stream->codec->extradata, out_stream->codec->extradata_size);
+
+
+        }else{
+            LOG_DEBUG("slice mode no need encode, just copy it.\n");
+
+            out_stream = avformat_new_stream(obj->output_ctx, in_stream->codec->codec);
+            if (!out_stream) {
+                LOG_ERROR("Failed allocating output stream\n");
+                return -1;
+            }
+
+            ret = 0;
+            ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
+            if (ret < 0) {
+                LOG_ERROR("Failed to copy context from input to output stream codec context\n");
+                return -1;
+            }
+
+            // set some params that should just copy from in_stream 
+            out_stream->codec->codec_tag = 0;
+
+            if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER){
+                LOG_DEBUG("AVFMT_GLOBALHEADER is True.\n");
+                out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+            }
         }
 
-        ret = 0;
-        ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
-        if (ret < 0) {
-            LOG_ERROR("Failed to copy context from input to output stream codec context\n");
-            return -1;
-        }
-        out_stream->codec->codec_tag = 0;
-        if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER){
-            LOG_DEBUG("AVFMT_GLOBALHEADER is True.\n");
-            out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-        }
+
+
 
         if ((in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) && (obj->first_video_stream_index == 0)){
             obj->first_video_stream_index = i;
         }
 
+        /*
         LOG_DEBUG("codec id:%d\n", out_stream->codec->codec_id);
         LOG_DEBUG("codec name:%s\n", out_stream->codec->codec_name);
         LOG_DEBUG("codec codec:%d\n", out_stream->codec->codec);
@@ -309,16 +436,14 @@ static int Slicer_open_output_media(Slicer_t *obj)
         LOG_DEBUG("codec codec_tag:%d\n", out_stream->codec->codec_tag);
         LOG_DEBUG("codec stream_codec_tag:%d\n", out_stream->codec->stream_codec_tag);
         LOG_DEBUG("codec av_class:%s\n", out_stream->codec->av_class->class_name);
+        LOG_DEBUG("codec profile:%d\n", out_stream->codec->profile);
+
+        LOG_DEBUG("codec rc_override_count:%d\n", out_stream->codec->rc_override_count);
+        LOG_DEBUG("codec rc_override:%d\n", out_stream->codec->rc_override);
+        LOG_DEBUG("codec bit_rate:%d\n", out_stream->codec->bit_rate);
+        LOG_DEBUG("codec priv_data:%d\n", out_stream->codec->priv_data);
+        */
     
-        // if slice mode need encode, should open the video encoder
-        if((in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) && 
-            (obj->params.slice_mode == SLICER_MODE_ENCODE_ONLY || obj->params.slice_mode == SLICER_MODE_ENCODE_COPY_ENCODE)){
-            
-            LOG_DEBUG("slice mode need encode, to open the encoder.\n");
-            // open the encoder
-        }else{
-            LOG_DEBUG("slice mode no need encode, just copy it.\n");
-        }
 
     }
 
@@ -464,6 +589,29 @@ static int Slicer_seek_start_time_key_frame(Slicer_t *obj)
     return 0;
 }
 
+static void Slicer_rebuild_packet_timestamp(Slicer_t *obj, AVPacket *pkt)
+{
+
+    // input stream timebase
+    AVRational input_timebase = obj->input_ctx->streams[pkt->stream_index]->time_base;
+
+    // output stream timebase
+    AVRational output_timebase = obj->output_ctx->streams[pkt->stream_index]->time_base;
+
+    int64_t first_video_frame_pts = av_rescale_q_rnd(obj->first_video_frame_pts, AV_TIME_BASE_Q, input_timebase, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+
+    int64_t first_video_frame_dts = av_rescale_q_rnd(obj->first_video_frame_dts, AV_TIME_BASE_Q, input_timebase, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+
+    int64_t dt = av_rescale_q_rnd(80, AV_TIME_BASE_Q, output_timebase, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+
+    // rebuild the timestamp
+    pkt->pts = av_rescale_q_rnd(pkt->pts - first_video_frame_pts, input_timebase, output_timebase, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX) + dt;
+    pkt->dts = av_rescale_q_rnd(pkt->dts - first_video_frame_dts, input_timebase, output_timebase, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX) + dt;
+    pkt->duration = av_rescale_q(pkt->duration, input_timebase, output_timebase);
+
+    //pkt->pos = -1;
+}
+
 static int Slicer_slice_copy_only(Slicer_t *obj)
 {
 
@@ -475,8 +623,8 @@ static int Slicer_slice_copy_only(Slicer_t *obj)
 
     int ret;
     AVPacket pkt;
-    int64_t first_video_key_frame_pts = 0;
-    int64_t first_video_key_frame_dts = 0;
+    int64_t first_video_frame_pts = 0;
+    int64_t first_video_frame_dts = 0;
 
     int64_t slice_end_time = obj->slice_end_time;
 
@@ -503,17 +651,17 @@ static int Slicer_slice_copy_only(Slicer_t *obj)
         }        
 
         // get the first video key frame to start
-        if (first_video_key_frame_pts == 0){
+        if (first_video_frame_pts == 0){
 
             // if the pkt is video and is key frame
             if ( (obj->output_ctx->streams[pkt.stream_index]->codec->codec_type == AVMEDIA_TYPE_VIDEO) && (pkt.flags & AV_PKT_FLAG_KEY)){
                 LOG_INFO("Get the first video key frame, dts: %lld ,pts: %lld\n", pkt.dts, pkt.pts);
-                first_video_key_frame_pts = pkt.pts;
-                first_video_key_frame_dts = pkt.dts;
+                first_video_frame_pts = pkt.pts;
+                first_video_frame_dts = pkt.dts;
 
                 slice_end_time = av_rescale_q_rnd(slice_end_time, AV_TIME_BASE_Q, obj->output_ctx->streams[pkt.stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
-                LOG_INFO("first_video_key_frame_pts: %lld\n", first_video_key_frame_pts);
-                LOG_INFO("first_video_key_frame_dts: %lld\n", first_video_key_frame_dts);
+                LOG_INFO("first_video_frame_pts: %lld\n", first_video_frame_pts);
+                LOG_INFO("first_video_frame_dts: %lld\n", first_video_frame_dts);
                 LOG_INFO("slice_end_time: %lld\n", slice_end_time);
 
             }else{
@@ -521,7 +669,7 @@ static int Slicer_slice_copy_only(Slicer_t *obj)
             }
         }
 
-        if ( first_video_key_frame_pts != 0 ) {
+        if ( first_video_frame_pts != 0 ) {
 
             // rebuild the timestamp
             pkt.pts = av_rescale_q_rnd(pkt.pts, obj->input_ctx->streams[pkt.stream_index]->time_base, obj->output_ctx->streams[pkt.stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
@@ -630,7 +778,7 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
     while(1){
         // 
         if (video_key_frame_number > 1){
-            LOG_DEBUG("video_key_frame_number(%d) > 1, break.\n", video_key_frame_number);
+            //LOG_DEBUG("video_key_frame_number(%d) > 1, break.\n", video_key_frame_number);
             break;
         }
 
@@ -682,7 +830,7 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
         spkt = obj->packets_queue_head.next;
         // until video key frame
         if( (spkt->packet.flags & AV_PKT_FLAG_KEY) && (obj->first_video_stream_index == spkt->packet.stream_index) && (out_queue_has_video_key > 0) ){
-            LOG_DEBUG(" break.\n");
+            //LOG_DEBUG(" break.\n");
             break;
         }
 
@@ -716,6 +864,266 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
     return 0;
 }
 
+
+
+static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int group_type)
+{
+    list_t tmp_video_head;
+    list_t tmp_audio_head;
+
+    Slicer_Packet_t * spkt = NULL;
+    AVFrame  frame;
+    int got_dec_frame;
+    int got_enc_frame;
+    int ret;
+    int packet_skip_flag;
+
+
+    int64_t slice_start_time = av_rescale_q_rnd(obj->slice_start_time, AV_TIME_BASE_Q, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+    int64_t slice_end_time   = av_rescale_q_rnd(obj->slice_end_time, AV_TIME_BASE_Q, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+
+
+
+    INIT_LIST_HEAD(&tmp_video_head);
+    INIT_LIST_HEAD(&tmp_audio_head);
+
+    LOG_INFO("slice_start_time=%lld, slice_end_time=%lld.\n", slice_start_time, slice_end_time);
+
+    // default skip the no need packet
+    packet_skip_flag = 0;
+
+    // while has packets
+    while(group_head->next != group_head){
+        spkt = group_head->next;
+        //LOG_DEBUG("packet stream_index:%d, dts=%lld. \n", spkt->packet.stream_index, spkt->packet.dts);
+
+        if(spkt->packet.stream_index == obj->first_video_stream_index){
+            //LOG_DEBUG("to decode the packet. \n");
+            got_dec_frame = 0;
+            memset(&frame, 0, sizeof(frame));
+            frame.extended_data = NULL;
+            //get_frame_defaults(&frame);
+            // decode the video 
+            ret = avcodec_decode_video2(obj->input_ctx->streams[obj->first_video_stream_index]->codec, &frame, &got_dec_frame, &spkt->packet);
+            if (ret < 0) {
+                LOG_ERROR("avcodec_decode_video2 failed, ret=%d\n", ret);
+                break;
+            }
+            // pop the packet from group_head, the spkt not free for contain encoded packet
+            list_del(spkt);
+
+            LOG_DEBUG("after decode ret=%d, got_dec_frame=%d. \n", ret, got_dec_frame);
+
+            // encode
+            if(got_dec_frame > 0){
+                frame.pts = av_frame_get_best_effort_timestamp(&frame);
+
+                // check the packet should be skip
+                if (group_type == SLICER_GROUP_TYPE_START){
+                    // if the packet timestamp < start_time, skip it.
+                    if (frame.pts < slice_start_time){
+                        LOG_DEBUG("frame.pts < slice_start_time, packet stream_index:%d, dts=%lld. \n", spkt->packet.stream_index, spkt->packet.dts);
+                        free(spkt);
+                        continue;
+                    }else{
+                        LOG_DEBUG("frame.pts >= slice_start_time, packet stream_index:%d, dts=%lld, to encode. \n", spkt->packet.stream_index, spkt->packet.dts);
+                        packet_skip_flag = 1;
+                    }
+
+                }
+
+                if (group_type == SLICER_GROUP_TYPE_END){
+                    // if the packet timestamp > end_time , skip it.
+                    if (frame.pts > slice_start_time){
+                        LOG_DEBUG("frame.pts > slice_start_time, packet stream_index:%d, dts=%lld, at the end, break. \n", spkt->packet.stream_index, spkt->packet.dts);
+                        free(spkt);
+                        break;
+                    }else{
+                        packet_skip_flag = 1;
+                    }
+                }
+
+
+                //LOG_DEBUG("got decoded frame to encode it. \n");
+                spkt->packet.data = NULL;
+                spkt->packet.size = 0;
+                av_init_packet(&spkt->packet);
+
+                
+
+                got_enc_frame = 0;
+                ret = avcodec_encode_video2(obj->output_ctx->streams[obj->first_video_stream_index]->codec, &spkt->packet, &frame, &got_enc_frame);
+                if (ret < 0){
+                    LOG_ERROR("avcodec_encode_video2 failed, ret=%d\n", ret);
+                    break;
+                }
+                LOG_DEBUG("after encoded ret=%d, got_enc_frame=%d. \n", ret, got_enc_frame);
+
+                if (got_enc_frame > 0){
+                    //LOG_DEBUG("got encoded frame to push it to queue. \n");
+                    // push the packet to tmp_video_head
+                    list_add_tail(spkt, &tmp_video_head);
+
+                    if (obj->first_video_frame_pts == 0){
+                        obj->first_video_frame_pts = av_rescale_q_rnd(spkt->packet.pts, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+                        obj->first_video_frame_dts = av_rescale_q_rnd(spkt->packet.dts, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+                    }
+
+                }else{
+                    free(spkt);
+                }
+
+            }else{
+                // the spkt no need, to free it
+                LOG_DEBUG("not got encoded frame, to free the spkt. \n", ret, got_dec_frame);
+                free(spkt);
+            }
+
+            // if get encoded frame, add it to tmp_head
+
+        }else{
+            
+            if (0 && packet_skip_flag == 1){
+                LOG_DEBUG("packet_skip_flag == 1, packet stream_index:%d, dts=%lld. \n", spkt->packet.stream_index, spkt->packet.dts);
+                list_del(spkt);
+                free(spkt);
+            }else{
+                // move the packets to tmp_audio_head
+                list_del(spkt);
+                list_add_tail(spkt, &tmp_audio_head);
+            }
+        }
+
+    }
+
+    // flush the decoder and encoder
+    LOG_INFO("Flushing stream #%u decoder\n", obj->first_video_stream_index);
+    while (1) {
+        
+        spkt = malloc(sizeof(Slicer_Packet_t));
+        if ( spkt == NULL){
+            LOG_ERROR("malloc Slicer_Packet_t failed, ret=%d\n");
+            break;
+        }
+
+        memset(spkt, 0, sizeof(Slicer_Packet_t));
+
+        spkt->packet.data = NULL;
+        spkt->packet.size = 0;
+        av_init_packet(&spkt->packet);
+
+
+//
+        got_dec_frame = 0;
+        memset(&frame, 0, sizeof(frame));
+        frame.extended_data = NULL;
+
+        // decode the video 
+        ret = avcodec_decode_video2(obj->input_ctx->streams[obj->first_video_stream_index]->codec, &frame, &got_dec_frame, &spkt->packet);
+        if (ret < 0) {
+            LOG_ERROR("avcodec_decode_video2 failed, ret=%d\n", ret);
+            break;
+        }
+        // pop the packet from group_head, the spkt not free for contain encoded packet
+
+        if (ret == 0){
+            LOG_INFO("There is no data to be decoded, break.\n");
+            free(spkt);
+            break;
+        }
+
+        LOG_DEBUG("after decode ret=%d, got_dec_frame=%d. \n", ret, got_dec_frame);
+
+        // encode
+        if(got_dec_frame > 0){
+            LOG_DEBUG("got decoded frame to encode it. \n");
+            spkt->packet.data = NULL;
+            spkt->packet.size = 0;
+            av_init_packet(&spkt->packet);
+
+            got_enc_frame = 0;
+            ret = avcodec_encode_video2(obj->output_ctx->streams[obj->first_video_stream_index]->codec, &spkt->packet, &frame, &got_enc_frame);
+            if (ret < 0){
+                LOG_ERROR("avcodec_encode_video2 failed, ret=%d\n", ret);
+                break;
+            }
+
+            if (got_enc_frame > 0){
+                LOG_DEBUG("got encoded frame to push it to queue. \n");
+                // push the packet to tmp_video_head
+                list_add_tail(spkt, &tmp_video_head);
+
+            }else{
+                free(spkt);
+            }
+
+        }else{
+            // the spkt no need, to free it
+            LOG_DEBUG("not got encoded frame, to free the spkt. \n", ret, got_dec_frame);
+            free(spkt);
+        }
+
+
+
+    }
+
+    //  flush the encoder
+    LOG_INFO("Flushing stream #%u encoder\n", obj->first_video_stream_index);
+    while(1){
+        
+        spkt = malloc(sizeof(Slicer_Packet_t));
+        if ( spkt == NULL){
+            LOG_ERROR("malloc Slicer_Packet_t failed, ret=%d\n");
+            break;
+        }
+
+        memset(spkt, 0, sizeof(Slicer_Packet_t));
+
+        spkt->packet.data = NULL;
+        spkt->packet.size = 0;
+        av_init_packet(&spkt->packet);
+
+        got_enc_frame = 0;
+        ret = avcodec_encode_video2(obj->output_ctx->streams[obj->first_video_stream_index]->codec, &spkt->packet, NULL, &got_enc_frame);
+        if (ret < 0){
+            LOG_ERROR("avcodec_encode_video2 failed, ret=%d\n", ret);
+            break;
+        }
+
+        if (got_enc_frame > 0){
+            LOG_DEBUG("got encoded frame to push it to queue. \n");
+            // push the packet to tmp_video_head
+            list_add_tail(spkt, &tmp_video_head);
+
+        }else{
+            LOG_INFO("There is no data that has been encoded, break.\n");
+            free(spkt);
+            break;
+        }
+    }
+
+
+    // move the packets to group_head
+    LOG_DEBUG("to move the packets to group_head. \n");
+    while((tmp_audio_head.next != &tmp_audio_head) || (tmp_video_head.next != &tmp_video_head)){
+        spkt = tmp_video_head.next;
+        if (spkt != &tmp_video_head){
+            list_del(spkt);
+            list_add_tail(spkt, group_head);
+            LOG_DEBUG("packet stream_index:%d, key=%d, dts=%lld, pts=%lld. \n", spkt->packet.stream_index, spkt->packet.flags&AV_PKT_FLAG_KEY, spkt->packet.dts, spkt->packet.pts);
+        }
+        spkt = tmp_audio_head.next;
+        if (spkt != &tmp_audio_head){
+            list_del(spkt);
+            list_add_tail(spkt, group_head);
+            LOG_DEBUG("packet stream_index:%d, dts=%lld. \n", spkt->packet.stream_index, spkt->packet.dts);
+        }
+    }
+
+
+    return 0;
+}
+
 static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
 {
 
@@ -737,7 +1145,7 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
     while(1){
         // read a gop, and to check if start or end gop. (start or end gop need transcode)
         ret = Slicer_read_group(obj, &packets_queue, &group_type);
-        LOG_DEBUG("Slicer_read_group ret:%d, group_type:%d \n", ret, group_type);
+        //LOG_DEBUG("Slicer_read_group ret:%d, group_type:%d \n", ret, group_type);
 
         if(packets_queue.next == &packets_queue){
             LOG_INFO("not get packet group, break.\n");
@@ -748,22 +1156,49 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
         int video_packets_number = 0;
         int audio_packets_number = 0;
         
+
+
+        // transcode when start group
+        if ( group_type == SLICER_GROUP_TYPE_START ){
+            LOG_INFO("this is the start group \n");
+            Slicer_video_transcode_group(obj, &packets_queue, 1);
+        }
+
+        if ( group_type == SLICER_GROUP_TYPE_END ){
+            LOG_INFO("this is the end group \n");
+            //Slicer_video_transcode_group(obj, &packets_queue, 2);
+        }
+
+        // write frame
         while(packets_queue.next != &packets_queue){
             //LOG_DEBUG("Slicer_slice_encode_copy_encode test line\n");
 
             spkt = packets_queue.next;
-            if( (spkt->packet.flags & AV_PKT_FLAG_KEY) && (obj->first_video_stream_index == spkt->packet.stream_index))
-                LOG_DEBUG("get packet: stream_index:%d, pts:%lld \n", spkt->packet.stream_index, spkt->packet.pts);
+            //if( (spkt->packet.flags & AV_PKT_FLAG_KEY) && (obj->first_video_stream_index == spkt->packet.stream_index))
+            if((obj->first_video_stream_index == spkt->packet.stream_index))
+                LOG_DEBUG("before rebuild, get packet: stream_index:%d, pts:%lld \n", spkt->packet.stream_index, spkt->packet.pts);
+
+
+            // rebuild timestamp
+            Slicer_rebuild_packet_timestamp(obj, &spkt->packet);
+
+            if((obj->first_video_stream_index == spkt->packet.stream_index))
+                LOG_DEBUG("after  rebuild, get packet: stream_index:%d, pts:%lld \n", spkt->packet.stream_index, spkt->packet.pts);
+
+            // write
+            //ret = av_interleaved_write_frame(obj->output_ctx, &spkt->packet);
+            ret = av_write_frame(obj->output_ctx, &spkt->packet);
+            if (ret < 0) {
+                LOG_ERROR("av_interleaved_write_frame error:%d\n", ret);
+                break;
+            }
+            av_free_packet(&spkt->packet);
 
             list_del(spkt);
-
             free(spkt);
 
+            break;
         }
-
-        // transcode start or end gop
-
-        // write frame
 
 
         // if the last group , break
@@ -772,6 +1207,9 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
             break;
         }
     }
+
+    av_write_trailer(obj->output_ctx);
+
     return 0;
 }
 
@@ -779,6 +1217,9 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
 int Slicer(Slicer_Params_t * params)
 {
     Slicer_t slicer;
+
+    LOG_INFO("av_log_get_level:%d.\n", av_log_get_level());
+    av_log_set_level(AV_LOG_TRACE);
 
     memset(&slicer, 0, sizeof(Slicer_t));
 
@@ -845,7 +1286,7 @@ int main(int argc, char ** argv)
 	//int end_time = atoi(argv[4]);
 
     strcpy(params.input_url, "/root/Meerkats.mp4");
-    strcpy(params.output_url, "out.mp4");
+    strcpy(params.output_url, "s2.mp4");
     params.start_time = 10000;
     params.end_time = 30000;
     //params.slice_mode = SLICER_MODE_COPY_ONLY;
