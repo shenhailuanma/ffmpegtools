@@ -11,6 +11,7 @@
 #include "libavformat/avformat.h"
 #include "libavcodec/avcodec.h"
 
+#include "libavcodec/get_bits.h"
 
 #include "libavutil/timestamp.h"
 #include "libavutil/opt.h"
@@ -267,8 +268,8 @@ static int Slicer_open_input_media(Slicer_t *obj)
 
 static void Slicer_parse_sps(uint8_t * data, int size)
 {
-    //GetBitContext bp;
-
+    GetBitContext bp;
+    ff_h264_decode_seq_parameter_set(data);
 
 }
 
@@ -315,7 +316,7 @@ static void Slicer_print_codec_context(AVCodecContext *ctx)
 
 static void Slicer_set_video_encoder_context(AVCodecContext *dest, const AVCodecContext *src)
 {
-    //Slicer_parse_sps(src->extradata, src->extradata_size);
+    Slicer_parse_sps(src->extradata, src->extradata_size);
 
     dest->height = src->height;
     dest->width = src->width;
