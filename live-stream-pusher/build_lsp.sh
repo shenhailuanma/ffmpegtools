@@ -39,27 +39,6 @@ fi
 popd
 
 
-# libx264
-pushd ${build_dir} 
-if ! [ -e "x264-ok" ]
-then
-    echo "########## libx264 begin ##########"
-    if ! [ -d "x264" ]
-    then
-        git clone --depth 1 git://git.videolan.org/x264
-    fi
-    pushd x264
-    ./configure --prefix=${release_dir} --enable-static --disable-opencl
-    make
-    make install
-    popd
-    touch x264-ok
-    echo "########## libx264 ok ##########"
-else
-    echo "########## libx264 has been installed ##########"
-fi
-popd
-
 # get the ffmpeg 
 pushd ${build_dir} 
 if ! [ -e "ffmpeg-2.2.16-ok" ]
@@ -81,7 +60,6 @@ then
     ./configure --prefix=${release_dir} --cc=$CC \
 --extra-cflags="-I${ffmpeg_exported_release_dir}/include" --extra-ldflags="-L${ffmpeg_exported_release_dir}/lib -lm" \
 --disable-pthreads --extra-libs=-lpthread --enable-gpl \
---enable-libx264  \
 --enable-postproc \
 --enable-demuxer=oss \
 --enable-static --enable-nonfree \
@@ -98,4 +76,23 @@ else
 fi
 popd
 
+ffmpeg_build_dir="${build_dir}/ffmpeg-2.2.16"
 
+# build liblsp.a
+echo "########## build liblsp.a ##########"
+gcc -c lsp.c -I${release_dir}/include
+ar cr ${release_dir}/lib/liblsp.a lsp.o
+cp -rf lsp.h ${release_dir}/include/lsp.h
+
+
+# build lsp_cmd
+echo "########## build build lsp_cmd ##########"
+gcc -o ${release_dir}/bin/lsp_cmd lsp_cmd.c ${release_dir}/lib/liblsp.a -I${ffmpeg_build_dir} -I${release_dir}/include \
+${ffmpeg_build_dir}/libavformat/libavformat.a \
+${ffmpeg_build_dir}/libavcodec/libavcodec.a \
+${ffmpeg_build_dir}/libavdevice/libavdevice.a \
+${ffmpeg_build_dir}/libavfilter/libavfilter.a \
+${ffmpeg_build_dir}/libavutil/libavutil.a \
+${ffmpeg_build_dir}/libswscale/libswscale.a \
+${ffmpeg_build_dir}/libswresample/libswresample.a \
+${ffmpeg_build_dir}/libpostproc/libpostproc.a  -lm  -lbz2 -lz -lpthread

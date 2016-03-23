@@ -45,7 +45,7 @@ enum audio_sample_format_type{
 #define     ERROR_CODE_NULL_POINTER                (-11)
 
 
-#define     ERROR_CODE_INPUT_ARGS_NULL             (-100)
+#define     ERROR_CODE_INPUT_ARGS_ERROR            (-100)
 #define     ERROR_CODE_MEMORY_ALLOC_ERROR          (-101)
 #define     ERROR_CODE_NO_OUTPUT                   (-102)
 #define     ERROR_CODE_NO_INPUT                    (-103)
@@ -134,10 +134,13 @@ typedef struct Fifo_Attrs {
 
 
 typedef struct Lsp_args{
+    char stream_src_path[MAX_PATH_LEN]; // "must be set !"
+    char stream_out_path[MAX_PATH_LEN]; // "must be set !"
+    char stream_save_path[MAX_PATH_LEN]; // "must be set when have_rtmp_stream > 0!"
+
     int have_video_stream; // "must be set !"
     int have_audio_stream; // "must be set !"
     int have_file_stream; // 
-    int have_rtmp_stream; 
 
     // video raw data, the video true data params
     int i_width;   // range 176 to 1920, "must be set !"
@@ -165,9 +168,6 @@ typedef struct Lsp_args{
     int o_sample_rate; // suggest 44100, out of range will be set same as input
 
     // others
-    char stream_out_path[MAX_PATH_LEN]; // "must be set !"
-    char stream_save_path[MAX_PATH_LEN]; // "must be set !"
-
     int  aextradata_size; 
     int  vextradata_size; // used for input data is encoded type
     char aextradata[128];
@@ -224,10 +224,44 @@ struct Lsp_obj{
 };
 typedef struct Lsp_obj * Lsp_handle;
 
+struct Lsp_status{
 
-// functions
-Lsp_handle LSP_open(Lsp_args *, int * err);
-int LSP_encode(struct Lsp_obj * , Lsp_data *);
-void LSP_close(struct Lsp_obj *);
+};
+
+
+/*** functions ***/
+
+/**
+ * Init the Lsp object by Lsp_args.
+ * @param obj       the pointer point to Lsp_obj which will be inited
+ * @param args      the pointer point to Lsp_args that contained params for init
+ * @return          0 if OK,  <0 if some error
+ */
+int Lsp_init(struct Lsp_obj * obj, struct Lsp_args * args);
+
+/**
+ * Push the data.
+ * @param obj       the pointer point to Lsp_obj
+ * @param data      the pointer point to Lsp_data that will be pushed
+ * @return          0 if OK,  <0 if some error
+ */
+int Lsp_push(struct Lsp_obj * obj, struct Lsp_data * data);
+
+/**
+ * Get the Lsp status info.
+ * @param obj       the pointer point to Lsp_obj
+ * @param status    the pointer point to Lsp_status that will be writed status info
+ * @return          0 if OK,  <0 if some error
+ */
+int Lsp_status(struct Lsp_obj * obj, struct Lsp_status * status);
+
+/**
+ * Release the Lsp object.
+ * @param obj       the pointer point to Lsp_obj
+ * @return          0 if OK,  <0 if some error
+ */
+int Lsp_release(struct Lsp_obj * obj);
+
+
 
 #endif
