@@ -75,7 +75,7 @@ enum audio_sample_format_type{
 
 #define     ERROR_CODE_OUT_CTX_CREATE_ERROR        (-400)
 #define     ERROR_CODE_OUT_STREAM_ERROR            (-401)
-#define     ERROR_CODE_OUT_FILE_ERROR              (-402)
+#define     ERROR_CODE_OUT_OPEN_FILE_ERROR         (-402)
 
 
 #define FALSE 0
@@ -89,22 +89,41 @@ typedef struct Lsp_args{
     int have_video_stream; // "must be set !  set > 0 , means you will push video data"
     int have_audio_stream; // "must be set !  set > 0 , means you will push audio data"
 
+    // video raw data, the video true data params
+    int i_width;   // range 176 to 1920, "must be set !"
+    int i_height;  // range 144 to 1080, "must be set !"
+    int i_pix_fmt; // now only support yv12(420), no need to set
+    int i_frame_rate; // range 1 to 30, "must be set !"
+    
     // audio raw data, the audio true data params
     int i_channels; // range 1 to 2, "must be set !"
     int i_sample_rate; // "must be set !", support 44100,22050
-    int i_sample_fmt; // "must be set !", use enum audio_sample_format_type  
+    int i_sample_fmt; // "must be set !", use enum xchannel_audio_sample_format_type  
 
+    // video enc params, the params which you want to encode
+    int vbit_rate;  // range 64000 to 1000000, default 100000bps
+    int o_width;    // range 10 to 1920, out of range will be set same as input
+    int o_height;   // range 10 to 1080, out of range will be set same as input
+    int o_pix_fmt;  // now only support yv12(420), no need to set
+    int o_frame_rate;  // range 1 to 30, out of range will be set same as input
+    int gop;        // range 25 to 250, default 50
+    int coder_type; // 
+    
     // audio enc params, the params which you want to encode
     int abit_rate;   //sugest 48000, 64000, default 48000, range 32k to 196k
     int o_channels;  // range 1 to 2, out of range will be set same as input
     int o_sample_rate; // suggest 44100, out of range will be set same as input
 
+
+    int  aextradata_size; 
+    int  vextradata_size; // used for input data is encoded type
+    char aextradata[128];
+    char vextradata[256];
+
 }Lsp_args;
 
 enum Lsp_data_type{
     DATA_TYPE_NONE,
-    DATA_TYPE_RAW_VIDEO, // raw video(yuv420)
-    DATA_TYPE_RAW_AUDIO, // raw audio(pcm)
     DATA_TYPE_ENC_VIDEO,  // encoded video (h264 nals)
     DATA_TYPE_ENC_AUDIO,  // encoded audio
     DATA_TYPE_FILE,// file path
