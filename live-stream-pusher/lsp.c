@@ -4,7 +4,18 @@
 #include <pthread.h>
 #include <assert.h>
 
+
 #include "lsp.h"
+
+
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
+#include <libavutil/common.h>
+
+
+
 
 /****  Defines *****/
 static int Glb_Log_Level = 4;
@@ -54,60 +65,52 @@ static int Glb_Log_Level = 4;
 #define VAL_IF_IN_RANGE(val, min, max) ((val)<(min) ? 0:((val)>(max) ? 0:1)) 
 
 
+struct Lsp_object{
+    
+    int video_frame_cnt;
+    int audio_sample_cnt;
+    
+    // new 
+    AVCodecContext *actx; // audio ctx for encode
+    AVCodecContext *vctx; // video ctx for encode
+    AVFormatContext *outctx;  // output ctx
+    AVFormatContext *savectx;  // output ctx
+    int out_video_stream_index;
+    int out_audio_stream_index;
+    int save_video_stream_index;
+    int save_audio_stream_index;
+    
+    Lsp_args args;
+    
+    // for rebuild timestamp
+    int64_t in_first_vdts;  // input first video dts
+    int64_t vdts;           // rebuilt video dts
+    int64_t in_first_adts;  // input first audio dts
+    int64_t adts;
+
+    int64_t start_time;
+    
+};
+
 
 
 static int _check_iargs_and_update_args(struct Lsp_args * xargs, struct Lsp_args * iargs)
 {
     // don't check args pointer, trust it
 
-    if(strlen(stream_src_path) <= 0){
+    if(strlen(iargs->stream_src_path) <= 0){
         return ERROR_CODE_NO_INPUT;
     }
 
     xargs->have_audio_stream = iargs->have_audio_stream;
     xargs->have_video_stream = iargs->have_video_stream;
-    xargs->have_file_stream  = iargs->have_file_stream;
-    xargs->have_rtmp_stream  = iargs->have_rtmp_stream;
 
 
     if(xargs->have_audio_stream <= 0 && xargs->have_video_stream <= 0){
         return ERROR_CODE_NO_INPUT;
     }
 
-    if(xargs->have_file_stream <= 0 && xargs->have_rtmp_stream <= 0){
-        return ERROR_CODE_NO_OUTPUT;
-    }
-
     // check raw input params
-    if(xargs->have_video_stream){
-        if(VAL_IF_IN_RANGE(iargs->i_width, 16, 1920)){
-            xargs->i_width = iargs->i_width; 
-        }else{
-            return ERROR_CODE_VIDEO_WIDTH_ERROR;
-        }
-        
-        if(VAL_IF_IN_RANGE(iargs->i_height, 16, 1080)){
-            xargs->i_height = iargs->i_height; 
-        }else{
-            return ERROR_CODE_VIDEO_HEIGHT_ERROR;
-        }   
-
-        xargs->o_pix_fmt = xargs->i_pix_fmt = AV_PIX_FMT_YUV420P; // now input raw video only support this fmt
-            
-        if(VAL_IF_IN_RANGE(iargs->i_frame_rate, 1, 30)){
-            xargs->i_frame_rate = iargs->i_frame_rate; 
-        }else{
-            return ERROR_CODE_VIDEO_FRAME_RATE_ERROR;
-        }
-        
-        if(VAL_IF_IN_RANGE(iargs->coder_type, VIDEO_CODER_TYPE_CAVLC, VIDEO_CODER_TYPE_CABAC)){
-            xargs->coder_type = iargs->coder_type; 
-        }else{
-            return ERROR_CODE_VIDEO_FRAME_RATE_ERROR;
-        }
-
-    }
-
     if(xargs->have_audio_stream){
         if(VAL_IF_IN_RANGE(iargs->i_channels, 1, 2)){
             xargs->i_channels = iargs->i_channels; 
@@ -129,40 +132,12 @@ static int _check_iargs_and_update_args(struct Lsp_args * xargs, struct Lsp_args
 
     }
 
-
-
-
-
-
     // check encode params
-    if(VAL_IF_IN_RANGE(iargs->vbit_rate, 100000, 1000000)){
-        xargs->vbit_rate = iargs->vbit_rate; // 100k
-    }
-
-    if(VAL_IF_IN_RANGE(iargs->o_width, 176, 1920)){
-        xargs->o_width = iargs->o_width; 
-    }else{
-        xargs->o_width = iargs->i_width;
-    }
-
-    if(VAL_IF_IN_RANGE(iargs->o_height, 144, 1080)){
-        xargs->o_height = iargs->o_height; 
-    }else{
-        xargs->o_height = iargs->i_height;
-    }
-
-    if(VAL_IF_IN_RANGE(iargs->o_frame_rate, 1, 30)){
-        xargs->o_frame_rate = iargs->o_frame_rate; 
-    }else{
-        xargs->o_frame_rate = iargs->i_frame_rate;
-    }
-
-    if(VAL_IF_IN_RANGE(iargs->gop, 25, 250)){
-        xargs->gop = iargs->gop; 
-    }
 
     if(VAL_IF_IN_RANGE(iargs->abit_rate, 32, 196)){
         xargs->abit_rate = iargs->abit_rate; 
+    }else{
+        xargs->abit_rate = 48;
     }
 
     if(VAL_IF_IN_RANGE(iargs->o_channels, 2, 2)){ // aac lib only support 2
@@ -183,27 +158,37 @@ static int _check_iargs_and_update_args(struct Lsp_args * xargs, struct Lsp_args
     if(strlen(iargs->stream_out_path))
         strcpy(xargs->stream_out_path, iargs->stream_out_path);
 
-    if(strlen(iargs->stream_save_path))
-        strcpy(xargs->stream_save_path, iargs->stream_save_path);
-
-
-    if(iargs->aextradata_size > 0){
-        xargs->aextradata_size = iargs->aextradata_size;
-        memcpy(xargs->aextradata, iargs->aextradata, iargs->aextradata_size);
-    }else{
-        xargs->aextradata[0] = 0x13;
-        xargs->aextradata[1] = 0x90;
-        xargs->aextradata_size = 2;
-    }
-
-    if(iargs->vextradata_size > 0){
-        xargs->vextradata_size = iargs->vextradata_size;
-        memcpy(xargs->vextradata, iargs->vextradata, iargs->vextradata_size);
-    }
     return ERROR_CODE_OK;
 }
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * Create the Lsp object.
+ * @return          not NULL if OK,  NULL if error
+ */
+Lsp_handle Lsp_create(void)
+{
+    Lsp_handle ptr = NULL;
+
+    ptr = (Lsp_handle *)malloc(sizeof(struct Lsp_object));
+    memset(ptr, 0, sizeof(struct Lsp_object));
+
+    return ptr;
+}
 
 /**
  * Init the Lsp object by Lsp_args.
@@ -211,13 +196,13 @@ static int _check_iargs_and_update_args(struct Lsp_args * xargs, struct Lsp_args
  * @param args      the pointer point to Lsp_args that contained params for init
  * @return          0 if OK,  <0 if some error
  */
-int Lsp_init(struct Lsp_obj * obj, struct Lsp_args * args)
+int Lsp_init(Lsp_handle handle, struct Lsp_args * args)
 {
     int ret;
 
     // check input params
-    if(obj == NULL){
-        LOG_ERROR("obj == NULL\n");
+    if(handle == NULL){
+        LOG_ERROR("handle == NULL\n");
         return ERROR_CODE_NULL_POINTER;
     }
     if(args == NULL){
@@ -225,11 +210,13 @@ int Lsp_init(struct Lsp_obj * obj, struct Lsp_args * args)
         return ERROR_CODE_NULL_POINTER;
     }
 
+    struct Lsp_object * object = (struct Lsp_object *)handle;
+
     // memeset the object
-    memset(obj, 0, sizeof(struct Lsp_obj));
+    memset(object, 0, sizeof(struct Lsp_object));
 
     // check input args and update to xargs
-    ret = _check_iargs_and_update_args(&obj->args, args);
+    ret = _check_iargs_and_update_args(&object->args, args);
     if(ret < 0){
         return ret;
     }

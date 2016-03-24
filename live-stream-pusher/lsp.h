@@ -4,13 +4,6 @@
 #include <sys/types.h>
 
 
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libswscale/swscale.h>
-#include <libswresample/swresample.h>
-#include <libavutil/common.h>
-
-
 
 #define MAX_PATH_LEN    1024
 #define TIME_BASE   1000
@@ -89,89 +82,22 @@ enum audio_sample_format_type{
 #define TRUE  1
 
 
-enum vidoe_coder_type{
-    VIDEO_CODER_TYPE_CAVLC, 
-    VIDEO_CODER_TYPE_CABAC, 
-};
-
-
-
-
-typedef struct Fifo_Object {
-    pthread_mutex_t mutex;
-    int             numBufs;
-    int             flush;
-    int             pipes[2];
-    int             maxsize;
-    int             inModId;
-    int             outModId;
-    int             inused;
-    int             outused;
-    int             switchflag;
-} Fifo_Object;
-
-/**
- * @brief       Handle through which to reference a Fifo.
- */
-typedef struct Fifo_Object *Fifo_Handle;
-
-/**
- * @brief       Attributes used to create a Fifo.
- * @see         Fifo_Attrs_DEFAULT.
- */
-typedef struct Fifo_Attrs {
-    /** 
-     * @brief      Maximum elements that can be put on the Fifo at once
-     * @remarks    For Bios only, Linux ignores this attribute
-     */     
-    int maxElems;
-} Fifo_Attrs;
-
-
-
-
-
-
-
 typedef struct Lsp_args{
-    char stream_src_path[MAX_PATH_LEN]; // "must be set !"
+    char stream_src_path[MAX_PATH_LEN]; // "must be set ! it used to get video encoder info"
     char stream_out_path[MAX_PATH_LEN]; // "must be set !"
-    char stream_save_path[MAX_PATH_LEN]; // "must be set when have_rtmp_stream > 0!"
 
-    int have_video_stream; // "must be set !"
-    int have_audio_stream; // "must be set !"
-    int have_file_stream; // 
+    int have_video_stream; // "must be set !  set > 0 , means you will push video data"
+    int have_audio_stream; // "must be set !  set > 0 , means you will push audio data"
 
-    // video raw data, the video true data params
-    int i_width;   // range 176 to 1920, "must be set !"
-    int i_height;  // range 144 to 1080, "must be set !"
-    int i_pix_fmt; // now only support yv12(420), no need to set
-    int i_frame_rate; // range 1 to 30, "must be set !"
-    
     // audio raw data, the audio true data params
     int i_channels; // range 1 to 2, "must be set !"
     int i_sample_rate; // "must be set !", support 44100,22050
     int i_sample_fmt; // "must be set !", use enum audio_sample_format_type  
 
-    // video enc params, the params which you want to encode
-    int vbit_rate;  // range 64000 to 1000000, default 100000bps
-    int o_width;    // range 10 to 1920, out of range will be set same as input
-    int o_height;   // range 10 to 1080, out of range will be set same as input
-    int o_pix_fmt;  // now only support yv12(420), no need to set
-    int o_frame_rate;  // range 1 to 30, out of range will be set same as input
-    int gop;        // range 25 to 250, default 50
-    int coder_type; // 
-    
     // audio enc params, the params which you want to encode
     int abit_rate;   //sugest 48000, 64000, default 48000, range 32k to 196k
     int o_channels;  // range 1 to 2, out of range will be set same as input
     int o_sample_rate; // suggest 44100, out of range will be set same as input
-
-    // others
-    int  aextradata_size; 
-    int  vextradata_size; // used for input data is encoded type
-    char aextradata[128];
-    char vextradata[256];
 
 }Lsp_args;
 
@@ -196,33 +122,8 @@ typedef struct Lsp_data{
 }Lsp_data;
 
 
-struct Lsp_obj{
-    
-    int video_frame_cnt;
-    int audio_sample_cnt;
-    
-    // new 
-    AVCodecContext *actx; // audio ctx for encode
-    AVCodecContext *vctx; // video ctx for encode
-    AVFormatContext *outctx;  // output ctx
-    AVFormatContext *savectx;  // output ctx
-    int out_video_stream_index;
-    int out_audio_stream_index;
-    int save_video_stream_index;
-    int save_audio_stream_index;
-    
-    Lsp_args args;
-    
-    // for rebuild timestamp
-    int64_t in_first_vdts;  // input first video dts
-    int64_t vdts;           // rebuilt video dts
-    int64_t in_first_adts;  // input first audio dts
-    int64_t adts;
+typedef void * Lsp_handle;
 
-    int64_t start_time;
-    
-};
-typedef struct Lsp_obj * Lsp_handle;
 
 struct Lsp_status{
 
@@ -230,37 +131,42 @@ struct Lsp_status{
 
 
 /*** functions ***/
+/**
+ * Create the Lsp object.
+ * @return          not NULL if OK,  NULL if error
+ */
+Lsp_handle Lsp_create(void);
 
 /**
  * Init the Lsp object by Lsp_args.
- * @param obj       the pointer point to Lsp_obj which will be inited
+ * @param handle       the pointer point to Lsp_handle which will be inited
  * @param args      the pointer point to Lsp_args that contained params for init
  * @return          0 if OK,  <0 if some error
  */
-int Lsp_init(struct Lsp_obj * obj, struct Lsp_args * args);
+int Lsp_init(Lsp_handle handle, struct Lsp_args * args);
 
 /**
  * Push the data.
- * @param obj       the pointer point to Lsp_obj
+ * @param handle       the pointer point to Lsp_handle
  * @param data      the pointer point to Lsp_data that will be pushed
  * @return          0 if OK,  <0 if some error
  */
-int Lsp_push(struct Lsp_obj * obj, struct Lsp_data * data);
+int Lsp_push(Lsp_handle handle, struct Lsp_data * data);
 
 /**
  * Get the Lsp status info.
- * @param obj       the pointer point to Lsp_obj
+ * @param handle       the pointer point to Lsp_handle
  * @param status    the pointer point to Lsp_status that will be writed status info
  * @return          0 if OK,  <0 if some error
  */
-int Lsp_status(struct Lsp_obj * obj, struct Lsp_status * status);
+int Lsp_status(Lsp_handle handle, struct Lsp_status * status);
 
 /**
  * Release the Lsp object.
- * @param obj       the pointer point to Lsp_obj
+ * @param handle       the pointer point to Lsp_handle
  * @return          0 if OK,  <0 if some error
  */
-int Lsp_release(struct Lsp_obj * obj);
+int Lsp_release(Lsp_handle * handle);
 
 
 

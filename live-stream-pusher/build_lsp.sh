@@ -81,18 +81,20 @@ ffmpeg_build_dir="${build_dir}/ffmpeg-2.2.16"
 # build liblsp.a
 echo "########## build liblsp.a ##########"
 gcc -c lsp.c -I${release_dir}/include
-ar cr ${release_dir}/lib/liblsp.a lsp.o
+ar crv ${release_dir}/lib/liblsp.a  lsp.o
+ar -s ${release_dir}/lib/liblsp.a
 cp -rf lsp.h ${release_dir}/include/lsp.h
 
 
 # build lsp_cmd
 echo "########## build build lsp_cmd ##########"
-gcc -o ${release_dir}/bin/lsp_cmd lsp_cmd.c ${release_dir}/lib/liblsp.a -I${ffmpeg_build_dir} -I${release_dir}/include \
-${ffmpeg_build_dir}/libavformat/libavformat.a \
-${ffmpeg_build_dir}/libavcodec/libavcodec.a \
-${ffmpeg_build_dir}/libavdevice/libavdevice.a \
-${ffmpeg_build_dir}/libavfilter/libavfilter.a \
-${ffmpeg_build_dir}/libavutil/libavutil.a \
-${ffmpeg_build_dir}/libswscale/libswscale.a \
-${ffmpeg_build_dir}/libswresample/libswresample.a \
-${ffmpeg_build_dir}/libpostproc/libpostproc.a  -lm  -lbz2 -lz -lpthread
+gcc -o ${release_dir}/bin/lsp_cmd lsp_cmd.c -I${release_dir}/include -L${release_dir}/lib -lm  -lbz2 -lz -lpthread -llsp \
+-lavformat \
+-lavcodec \
+-lavdevice \
+-lavfilter \
+-lavutil \
+-lswscale \
+-lswresample \
+-lpostproc -lx264
+
