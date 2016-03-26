@@ -925,8 +925,8 @@ int Lsp_push(Lsp_handle handle, struct Lsp_data * data)
 
         LOG_DEBUG("vcount:%lld, acont:%lld, vpushed:%lld, apushed:%lld, video_data_size:%lld, audio_data_size:%lld, total_size:%lld.\n", 
             object->status.video_frame_cnt, object->status.audio_frame_cnt,
-            object->outctx->streams[object->out_video_stream_index]->nb_frames,
-            object->outctx->streams[object->out_audio_stream_index]->nb_frames,
+            object->status.video_pushed_frame_cnt,
+            object->status.audio_pushed_frame_cnt,
             object->status.video_data_size, object->status.audio_data_size, object->status.total_size);
 
     }
@@ -946,7 +946,28 @@ int Lsp_push(Lsp_handle handle, struct Lsp_data * data)
  */
 int Lsp_status(Lsp_handle handle, struct Lsp_status * status)
 {
-
+    struct Lsp_object * object = (struct Lsp_object *)handle;
+    memcpy(status, &object->status, sizeof(struct Lsp_status));
+    
     return ERROR_CODE_OK;
 }
 
+
+int Lsp_release(Lsp_handle * handle)
+{
+    struct Lsp_object * object = (struct Lsp_object *)handle;
+
+    // flush the outctx
+    if(object->outctx){
+        av_write_trailer(object->outctx);
+    }
+
+    // free the outctx
+    if (object->outctx)
+        avio_close(object->outctx->pb);
+    avformat_free_context(object->outctx);
+
+
+
+    return ERROR_CODE_OK;
+}

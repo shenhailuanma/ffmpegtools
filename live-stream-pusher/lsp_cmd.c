@@ -245,5 +245,24 @@ int main(int argc, char ** argv)
         msSleep(10);
     }
 
+
+    // get status info
+    struct Lsp_status status;
+    ret = Lsp_status(handle, &status);
+    printf("Lsp_release return:(%d). \n", ret);
+    printf("vcount:%lld, acont:%lld, vpushed:%lld, apushed:%lld, video_data_size:%lld, audio_data_size:%lld, total_size:%lld.\n", 
+        status.video_frame_cnt, status.audio_frame_cnt,
+        status.video_pushed_frame_cnt,
+        status.audio_pushed_frame_cnt,
+        status.video_data_size, status.audio_data_size, status.total_size);
+
+    printf("runtime info, fps=%.1f, bitrate=%.1f, video_bitrate=%.1f, audio_bitrate=%.1f, start_time=%.1f, duration=%.1f s\n", 
+        status.fps, status.bitrate, status.video_bitrate, status.audio_bitrate,
+        (float)status.stream_start_time/1000000, (float)status.duration/1000000);
+
+    // release the object
+    ret = Lsp_release(handle);
+    printf("Lsp_release return:(%d). \n", ret);
+
     return 0;
 }
