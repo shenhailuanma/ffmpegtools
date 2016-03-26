@@ -20,7 +20,7 @@
 
 
 /****  Defines *****/
-static int Glb_Log_Level = 4;
+static int Glb_Log_Level = 3;
 #define LOG_DEBUG(format, arg...)    \
     if (Glb_Log_Level >=4) {    \
         time_t Log_Timer = time(NULL); \
@@ -487,7 +487,7 @@ static int Slicer_open_input_media(Slicer_t *obj)
             if (obj->input_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
                 LOG_DEBUG("find streams[%d] is video stream, need to open video codec.\n", i);
                 // for test
-                LOG_DEBUG(" streams[%d] extradata_size:%d.\n", i, obj->input_ctx->streams[i]->codec->extradata_size);
+                LOG_INFO(" streams[%d] extradata_size:%d.\n", i, obj->input_ctx->streams[i]->codec->extradata_size);
                 print_hex(obj->input_ctx->streams[i]->codec->extradata, obj->input_ctx->streams[i]->codec->extradata_size);
                 //Slicer_h264_decode_extradata(obj->input_ctx->streams[i]->codec->extradata, obj->input_ctx->streams[i]->codec->extradata_size);
                 Slicer_decode_h264_extradata(obj, obj->input_ctx->streams[i]->codec->extradata, obj->input_ctx->streams[i]->codec->extradata_size);
@@ -688,10 +688,15 @@ static int Slicer_open_output_media(Slicer_t *obj)
             av_dict_free(&opts);
             LOG_DEBUG("avcodec_open2 ok.\n");
 
-            LOG_DEBUG("[OUT] streams[%d] extradata_size:%d.\n", i, out_stream->codec->extradata_size);
+            LOG_INFO("[OUT] streams[%d] extradata_size:%d.\n", i, out_stream->codec->extradata_size);
             print_hex(out_stream->codec->extradata, out_stream->codec->extradata_size);
 
             Slicer_decode_h264_extradata(obj, out_stream->codec->extradata, out_stream->codec->extradata_size);
+
+
+            // copy input extradata to output
+            memcpy(out_stream->codec->extradata, in_stream->codec->extradata, in_stream->codec->extradata_size);
+            out_stream->codec->extradata_size = in_stream->codec->extradata_size;
 
             // FIXME: test copy input extradata to output 
             /*
@@ -905,7 +910,7 @@ static int Slicer_rebuild_packet_timestamp(Slicer_t *obj, AVPacket *pkt)
 
     // skip the no need packets
     if( (pkt->pts - first_video_frame_pts < 0) || (pkt->dts - first_video_frame_dts < 0)) {
-        LOG_WARN("stream_index:%d, pkt->pts(%lld) - first_video_frame_pts(%lld) < 0 || pkt->dts(%lld) - first_video_frame_dts(%lld) < 0\n",
+        LOG_DEBUG("stream_index:%d, pkt->pts(%lld) - first_video_frame_pts(%lld) < 0 || pkt->dts(%lld) - first_video_frame_dts(%lld) < 0\n",
             pkt->stream_index, pkt->pts, first_video_frame_pts, pkt->dts, first_video_frame_dts);
         return -1;
     }
@@ -1087,7 +1092,7 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
         spkt = NULL;
     }
 
-
+    int64_t slice_end_time = obj->slice_end_time;
     int media_end_of_file = 0;
 
     // read packets
@@ -1145,6 +1150,14 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
     // get packets which in tmp queue
     while(obj->packets_queue_head.next != &obj->packets_queue_head){
         spkt = obj->packets_queue_head.next;
+
+        // if packet dts>=end_time, set group_type
+        slice_end_time = av_rescale_q_rnd(obj->slice_end_time, AV_TIME_BASE_Q, obj->output_ctx->streams[spkt->packet.stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+        if(spkt->packet.dts >= slice_end_time){
+            LOG_INFO("find the end, spkt->packet.dts(%lld) >= slice_end_time(%lld).\n", spkt->packet.dts, slice_end_time);
+            media_end_of_file = 1;
+        }
+    
         // until video key frame
         if( (spkt->packet.flags & AV_PKT_FLAG_KEY) && (obj->first_video_stream_index == spkt->packet.stream_index) && (out_queue_has_video_key > 0) ){
             //LOG_DEBUG(" break.\n");
@@ -1170,14 +1183,15 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
         *group_type = 1;
         obj->packets_group_count = 1;
 
-    }else if(media_end_of_file){
-        obj->packets_group_count += 1;
-        *group_type = 2;
     }else{
         obj->packets_group_count += 1;
         *group_type = 0;
     }
 
+    if(media_end_of_file){
+        obj->packets_group_count += 1;
+        *group_type = 2;
+    }
     return 0;
 }
 
@@ -1552,7 +1566,7 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
 
         if ( group_type == SLICER_GROUP_TYPE_END ){
             LOG_INFO("this is the end group \n");
-            //Slicer_video_transcode_group(obj, &packets_queue, 2);
+            Slicer_video_transcode_group(obj, &packets_queue, 2);
         }
 
         // write frame
@@ -1691,8 +1705,8 @@ int main(int argc, char ** argv)
 	//int start_time = atoi(argv[3]);
 	//int end_time = atoi(argv[4]);
 
-    strcpy(params.input_url, "Meerkats.ts");
-    strcpy(params.output_url, "s3.ts");
+    strcpy(params.input_url, "/root/video/Meerkats.mp4");
+    strcpy(params.output_url, "s3.mp4");
     params.start_time = 17158;
     params.end_time = 30000;
     //params.slice_mode = SLICER_MODE_COPY_ONLY;
