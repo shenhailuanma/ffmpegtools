@@ -66,11 +66,7 @@ static int Glb_Log_Level = 4;
 
 
 struct Lsp_object{
-    
-    int video_frame_cnt;
-    int audio_sample_cnt;
-    
-    // new 
+
     AVCodecContext *actx; // audio ctx for encode
     AVCodecContext *vctx; // video ctx for encode
     AVFormatContext *outctx;  // output ctx
@@ -86,8 +82,17 @@ struct Lsp_object{
     int64_t in_first_adts;  // input first audio dts
     int64_t adts;
 
-    int64_t start_time;
-    
+    int64_t start_time;     // the packet push start time, used for write in interrupt_cb
+    int64_t runtime_update_time;
+    int64_t runtime_duration;
+    int64_t runtime_audio_data_size;  // in Byte
+    int64_t runtime_video_data_size;  // in Byte
+    int64_t runtime_total_size;       // in Byte
+    int64_t runtime_audio_frame_cnt;
+    int64_t runtime_video_frame_cnt;
+    int64_t runtime_total_frame_cnt;
+
+    struct Lsp_status status;
 };
 
 
@@ -236,7 +241,7 @@ static int _lsp_interrupt_cb(void *h)
 
     now = av_gettime();
 
-    LOG_DEBUG("now(%lld) - start(%lld) = %lld\n", now, handle->start_time, now - handle->start_time );
+    LOG_DEBUG("now(%"PRId64") - start(%"PRId64") = %"PRId64"\n", now, handle->start_time, now - handle->start_time );
    
     if(now - handle->start_time > 5000000){
         LOG_ERROR("_lsp_interrupt_cb return.\n");
@@ -754,6 +759,9 @@ int Lsp_init(Lsp_handle handle, struct Lsp_args * args)
     // memeset the object
     memset(object, 0, sizeof(struct Lsp_object));
 
+    object->out_audio_stream_index = -1;
+    object->out_video_stream_index = -1;
+
     // check input args and update to xargs
     ret = _check_iargs_and_update_args(&object->args, args);
     if(ret < 0){
@@ -772,6 +780,13 @@ int Lsp_init(Lsp_handle handle, struct Lsp_args * args)
     return ERROR_CODE_OK;
 }
 
+
+/**
+ * Push the data.
+ * @param handle       the pointer point to Lsp_handle
+ * @param data      the pointer point to Lsp_data that will be pushed
+ * @return          0 if OK,  <0 if some error
+ */
 int Lsp_push(Lsp_handle handle, struct Lsp_data * data)
 {
     // check input params
@@ -837,19 +852,83 @@ int Lsp_push(Lsp_handle handle, struct Lsp_data * data)
         LOG_DEBUG("pkt NULL, type:%d, ts:%lld\n", data->type, data->pts);
     }
 
+    // av_gettime() timebase is AV_TIME_BASE=1000000
     object->start_time = av_gettime();
     
     if(object->outctx != NULL && pkt){
-        LOG_DEBUG("write a frame to out, type: %d, pts:%lld, dts:%lld, vcount:%lld, acont:%lld.\n", data->type,pkt->pts, pkt->dts,
-            object->outctx->streams[object->out_video_stream_index]->nb_frames,
-            object->outctx->streams[object->out_audio_stream_index]->nb_frames);
+        // frames cnt
+        if(pkt->stream_index == object->out_video_stream_index){
+            object->status.video_frame_cnt ++;
+            object->status.video_data_size += pkt->size;
+            object->runtime_video_frame_cnt ++;
+            object->runtime_video_data_size += pkt->size;
+        }
+        if(pkt->stream_index == object->out_audio_stream_index){
+            object->status.audio_frame_cnt ++;
+            object->status.audio_data_size += pkt->size;
+            object->runtime_audio_frame_cnt ++;
+            object->runtime_audio_data_size += pkt->size;
+        }
+        object->status.total_frame_cnt = object->status.video_frame_cnt + object->status.audio_frame_cnt;
+        object->status.total_size      = object->status.video_data_size + object->status.audio_data_size;
+        object->runtime_total_size = object->runtime_video_data_size + object->runtime_audio_data_size;
+        object->runtime_total_frame_cnt = object->runtime_video_frame_cnt + object->runtime_audio_frame_cnt;
+
+        if(object->runtime_update_time == 0){
+            object->runtime_update_time = object->start_time;
+            LOG_DEBUG("init runtime_update_time:%lld\n", object->runtime_update_time);
+        }
+
+        if(object->status.stream_start_time == 0){
+            object->status.stream_start_time = object->start_time;
+        }
+        object->status.duration = object->start_time - object->status.stream_start_time;
+
+        // if dt > 3s, update the runtime status info
+        object->runtime_duration = object->start_time - object->runtime_update_time;
+        if(object->runtime_duration > 3000000){
+            object->runtime_update_time = object->start_time;
+            // update the runtime status info
+            object->status.fps = (float)object->runtime_video_frame_cnt*1000000/object->runtime_duration;
+            object->status.bitrate = (float)object->runtime_total_size*8000000/object->runtime_duration;
+            object->status.video_bitrate = (float)object->runtime_video_data_size*8000000/object->runtime_duration;
+            object->status.audio_bitrate = (float)object->runtime_audio_data_size*8000000/object->runtime_duration;
+
+            // update the runtime data
+            object->runtime_audio_data_size = 0;
+            object->runtime_video_data_size = 0;
+            object->runtime_total_size = 0;
+
+            object->runtime_audio_frame_cnt = 0;
+            object->runtime_video_frame_cnt = 0;
+            object->runtime_total_frame_cnt = 0;
+        }
+        LOG_DEBUG("runtime info, fps=%.1f, bitrate=%.1f, video_bitrate=%.1f, audio_bitrate=%.1f, start_time=%.1f, duration=%.1f s\n", 
+            object->status.fps, object->status.bitrate, object->status.video_bitrate, object->status.audio_bitrate,
+            (float)object->status.stream_start_time/1000000, (float)object->status.duration/1000000);
+
+        LOG_DEBUG("write a frame to out, type: %d, pts:%lld, dts:%lld\n", data->type,pkt->pts, pkt->dts);
+
         if (av_interleaved_write_frame(object->outctx, pkt) < 0) {
             LOG_ERROR("error av_write_frame.\n");
             return ERROR_CODE_OUT_STREAM_ERROR;
         }
 
-        object->video_frame_cnt = object->outctx->streams[object->out_video_stream_index]->nb_frames;
-        object->audio_sample_cnt = object->outctx->streams[object->out_audio_stream_index]->nb_frames;
+        if(object->out_audio_stream_index >= 0){
+            object->status.audio_pushed_frame_cnt = object->outctx->streams[object->out_audio_stream_index]->nb_frames;
+        }
+        if(object->out_video_stream_index >= 0){
+            object->status.video_pushed_frame_cnt = object->outctx->streams[object->out_video_stream_index]->nb_frames;
+        }
+        object->status.total_pushed_frame_cnt = object->status.audio_pushed_frame_cnt + object->status.video_pushed_frame_cnt;
+
+
+        LOG_DEBUG("vcount:%lld, acont:%lld, vpushed:%lld, apushed:%lld, video_data_size:%lld, audio_data_size:%lld, total_size:%lld.\n", 
+            object->status.video_frame_cnt, object->status.audio_frame_cnt,
+            object->outctx->streams[object->out_video_stream_index]->nb_frames,
+            object->outctx->streams[object->out_audio_stream_index]->nb_frames,
+            object->status.video_data_size, object->status.audio_data_size, object->status.total_size);
+
     }
         
     av_free_packet(pkt);
@@ -857,3 +936,17 @@ int Lsp_push(Lsp_handle handle, struct Lsp_data * data)
 
     return ERROR_CODE_OK;
 }
+
+
+/**
+ * Get the Lsp status info.
+ * @param handle       the pointer point to Lsp_handle
+ * @param status    the pointer point to Lsp_status that will be writed status info
+ * @return          0 if OK,  <0 if some error
+ */
+int Lsp_status(Lsp_handle handle, struct Lsp_status * status)
+{
+
+    return ERROR_CODE_OK;
+}
+

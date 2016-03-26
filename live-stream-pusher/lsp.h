@@ -145,6 +145,28 @@ typedef void * Lsp_handle;
 
 
 struct Lsp_status{
+    // input frames cnt
+    int64_t audio_frame_cnt;
+    int64_t video_frame_cnt;
+    int64_t total_frame_cnt;
+
+    // pushed frames cnt
+    int64_t audio_pushed_frame_cnt;
+    int64_t video_pushed_frame_cnt;
+    int64_t total_pushed_frame_cnt;
+
+    int64_t audio_data_size;  // in Byte
+    int64_t video_data_size;  // in Byte
+    int64_t total_size;       // in Byte
+
+    int64_t stream_start_time;
+    
+    // runtime status info
+    int64_t duration; // in sec
+    float  fps;      // frames per second
+    float  bitrate;  // bits/s
+    float  audio_bitrate;   // bits/s
+    float  video_bitrate;   // bits/s
 
 };
 
