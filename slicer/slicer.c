@@ -149,6 +149,10 @@ typedef struct {
 
     int64_t dt_timestamp_input_timebase;
 
+    AVFormatContext * tmp_ctx;
+    SPS *sps;
+    PPS *pps;
+
 } Slicer_t;
 
 typedef struct Slicer_Packet_t{
@@ -217,117 +221,117 @@ static void Slicer_params_default(Slicer_Params_t * params)
 
 static void Slicer_print_sps(SPS *sps)
 {
-    LOG_DEBUG("SPS: sps_id=%u.\n", sps->sps_id);
-    LOG_DEBUG("SPS: profile_idc=%d.\n", sps->profile_idc);
-    LOG_DEBUG("SPS: level_idc=%d.\n", sps->level_idc);
-    LOG_DEBUG("SPS: chroma_format_idc=%d.\n", sps->chroma_format_idc);
-    LOG_DEBUG("SPS: transform_bypass=%d.\n", sps->transform_bypass);
-    LOG_DEBUG("SPS: log2_max_frame_num=%d.\n", sps->log2_max_frame_num);
-    LOG_DEBUG("SPS: poc_type=%d.\n", sps->poc_type);
-    LOG_DEBUG("SPS: log2_max_poc_lsb=%d.\n", sps->log2_max_poc_lsb);
-    LOG_DEBUG("SPS: delta_pic_order_always_zero_flag=%d.\n", sps->delta_pic_order_always_zero_flag);
-    LOG_DEBUG("SPS: offset_for_non_ref_pic=%d.\n", sps->offset_for_non_ref_pic);
-    LOG_DEBUG("SPS: offset_for_top_to_bottom_field=%d.\n", sps->offset_for_top_to_bottom_field);
+    LOG_INFO("SPS: sps_id=%u.\n", sps->sps_id);
+    LOG_INFO("SPS: profile_idc=%d.\n", sps->profile_idc);
+    LOG_INFO("SPS: level_idc=%d.\n", sps->level_idc);
+    LOG_INFO("SPS: chroma_format_idc=%d.\n", sps->chroma_format_idc);
+    LOG_INFO("SPS: transform_bypass=%d.\n", sps->transform_bypass);
+    LOG_INFO("SPS: log2_max_frame_num=%d.\n", sps->log2_max_frame_num);
+    LOG_INFO("SPS: poc_type=%d.\n", sps->poc_type);
+    LOG_INFO("SPS: log2_max_poc_lsb=%d.\n", sps->log2_max_poc_lsb);
+    LOG_INFO("SPS: delta_pic_order_always_zero_flag=%d.\n", sps->delta_pic_order_always_zero_flag);
+    LOG_INFO("SPS: offset_for_non_ref_pic=%d.\n", sps->offset_for_non_ref_pic);
+    LOG_INFO("SPS: offset_for_top_to_bottom_field=%d.\n", sps->offset_for_top_to_bottom_field);
 
-    LOG_DEBUG("SPS: poc_cycle_length=%d.\n", sps->poc_cycle_length);
-    LOG_DEBUG("SPS: ref_frame_count=%d.\n", sps->ref_frame_count);
-    LOG_DEBUG("SPS: gaps_in_frame_num_allowed_flag=%d.\n", sps->gaps_in_frame_num_allowed_flag);
-    LOG_DEBUG("SPS: mb_width=%d.\n", sps->mb_width);
-    LOG_DEBUG("SPS: mb_height=%d.\n", sps->mb_height);
-    LOG_DEBUG("SPS: frame_mbs_only_flag=%d.\n", sps->frame_mbs_only_flag);
+    LOG_INFO("SPS: poc_cycle_length=%d.\n", sps->poc_cycle_length);
+    LOG_INFO("SPS: ref_frame_count=%d.\n", sps->ref_frame_count);
+    LOG_INFO("SPS: gaps_in_frame_num_allowed_flag=%d.\n", sps->gaps_in_frame_num_allowed_flag);
+    LOG_INFO("SPS: mb_width=%d.\n", sps->mb_width);
+    LOG_INFO("SPS: mb_height=%d.\n", sps->mb_height);
+    LOG_INFO("SPS: frame_mbs_only_flag=%d.\n", sps->frame_mbs_only_flag);
 
-    LOG_DEBUG("SPS: mb_aff=%d.\n", sps->mb_aff);
-    LOG_DEBUG("SPS: direct_8x8_inference_flag=%d.\n", sps->direct_8x8_inference_flag);
-    LOG_DEBUG("SPS: crop=%d.\n", sps->crop);
-    LOG_DEBUG("SPS: crop_left=%u.\n", sps->crop_left);
-    LOG_DEBUG("SPS: crop_right=%u.\n", sps->crop_right);
-    LOG_DEBUG("SPS: crop_top=%u.\n", sps->crop_top);
-    LOG_DEBUG("SPS: crop_bottom=%u.\n", sps->crop_bottom);
+    LOG_INFO("SPS: mb_aff=%d.\n", sps->mb_aff);
+    LOG_INFO("SPS: direct_8x8_inference_flag=%d.\n", sps->direct_8x8_inference_flag);
+    LOG_INFO("SPS: crop=%d.\n", sps->crop);
+    LOG_INFO("SPS: crop_left=%u.\n", sps->crop_left);
+    LOG_INFO("SPS: crop_right=%u.\n", sps->crop_right);
+    LOG_INFO("SPS: crop_top=%u.\n", sps->crop_top);
+    LOG_INFO("SPS: crop_bottom=%u.\n", sps->crop_bottom);
 
-    LOG_DEBUG("SPS: vui_parameters_present_flag=%d.\n", sps->vui_parameters_present_flag);
-    LOG_DEBUG("SPS: sar.num=%d.\n", sps->sar.num);
-    LOG_DEBUG("SPS: sar.den=%d.\n", sps->sar.den);
-    LOG_DEBUG("SPS: video_signal_type_present_flag=%d.\n", sps->video_signal_type_present_flag);
-    LOG_DEBUG("SPS: full_range=%d.\n", sps->full_range);
-    LOG_DEBUG("SPS: colour_description_present_flag=%d.\n", sps->colour_description_present_flag);
-    LOG_DEBUG("SPS: color_primaries=%d.\n", sps->color_primaries);
-    LOG_DEBUG("SPS: color_trc=%d.\n", sps->color_trc);
-    LOG_DEBUG("SPS: colorspace=%d.\n", sps->colorspace);
-    LOG_DEBUG("SPS: timing_info_present_flag=%d.\n", sps->timing_info_present_flag);
+    LOG_INFO("SPS: vui_parameters_present_flag=%d.\n", sps->vui_parameters_present_flag);
+    LOG_INFO("SPS: sar.num=%d.\n", sps->sar.num);
+    LOG_INFO("SPS: sar.den=%d.\n", sps->sar.den);
+    LOG_INFO("SPS: video_signal_type_present_flag=%d.\n", sps->video_signal_type_present_flag);
+    LOG_INFO("SPS: full_range=%d.\n", sps->full_range);
+    LOG_INFO("SPS: colour_description_present_flag=%d.\n", sps->colour_description_present_flag);
+    LOG_INFO("SPS: color_primaries=%d.\n", sps->color_primaries);
+    LOG_INFO("SPS: color_trc=%d.\n", sps->color_trc);
+    LOG_INFO("SPS: colorspace=%d.\n", sps->colorspace);
+    LOG_INFO("SPS: timing_info_present_flag=%d.\n", sps->timing_info_present_flag);
 
 
-    LOG_DEBUG("SPS: num_units_in_tick=%u.\n", sps->num_units_in_tick);
-    LOG_DEBUG("SPS: time_scale=%u.\n", sps->time_scale);
-    LOG_DEBUG("SPS: fixed_frame_rate_flag=%d.\n", sps->fixed_frame_rate_flag);
+    LOG_INFO("SPS: num_units_in_tick=%u.\n", sps->num_units_in_tick);
+    LOG_INFO("SPS: time_scale=%u.\n", sps->time_scale);
+    LOG_INFO("SPS: fixed_frame_rate_flag=%d.\n", sps->fixed_frame_rate_flag);
 
     // offset_for_ref_frame 
-    LOG_DEBUG("SPS: offset_for_ref_frame=");
-    print_hex(sps->offset_for_ref_frame, 512);
+    //LOG_INFO("SPS: offset_for_ref_frame=");
+    //print_hex(sps->offset_for_ref_frame, 512);
 
-    LOG_DEBUG("SPS: bitstream_restriction_flag=%d.\n", sps->bitstream_restriction_flag);
-    LOG_DEBUG("SPS: num_reorder_frames=%d.\n", sps->num_reorder_frames);
-    LOG_DEBUG("SPS: scaling_matrix_present=%d.\n", sps->scaling_matrix_present);
+    LOG_INFO("SPS: bitstream_restriction_flag=%d.\n", sps->bitstream_restriction_flag);
+    LOG_INFO("SPS: num_reorder_frames=%d.\n", sps->num_reorder_frames);
+    LOG_INFO("SPS: scaling_matrix_present=%d.\n", sps->scaling_matrix_present);
 
     // scaling_matrix4
-    LOG_DEBUG("SPS: scaling_matrix4=");
-    print_hex(sps->scaling_matrix4, 96);
+    LOG_INFO("SPS: scaling_matrix4=");
+    //print_hex(sps->scaling_matrix4, 96);
     // scaling_matrix8
-    LOG_DEBUG("SPS: scaling_matrix8=");
-    print_hex(sps->scaling_matrix8, 384);
+    LOG_INFO("SPS: scaling_matrix8=");
+    //print_hex(sps->scaling_matrix8, 384);
 
-    LOG_DEBUG("SPS: nal_hrd_parameters_present_flag=%d.\n", sps->nal_hrd_parameters_present_flag);
-    LOG_DEBUG("SPS: vcl_hrd_parameters_present_flag=%d.\n", sps->vcl_hrd_parameters_present_flag);
-    LOG_DEBUG("SPS: pic_struct_present_flag=%d.\n", sps->pic_struct_present_flag);
-    LOG_DEBUG("SPS: time_offset_length=%d.\n", sps->time_offset_length);
+    LOG_INFO("SPS: nal_hrd_parameters_present_flag=%d.\n", sps->nal_hrd_parameters_present_flag);
+    LOG_INFO("SPS: vcl_hrd_parameters_present_flag=%d.\n", sps->vcl_hrd_parameters_present_flag);
+    LOG_INFO("SPS: pic_struct_present_flag=%d.\n", sps->pic_struct_present_flag);
+    LOG_INFO("SPS: time_offset_length=%d.\n", sps->time_offset_length);
 
-    LOG_DEBUG("SPS: cpb_cnt=%d.\n", sps->cpb_cnt);
-    LOG_DEBUG("SPS: initial_cpb_removal_delay_length=%d.\n", sps->initial_cpb_removal_delay_length);
-    LOG_DEBUG("SPS: cpb_removal_delay_length=%d.\n", sps->cpb_removal_delay_length);
-    LOG_DEBUG("SPS: dpb_output_delay_length=%d.\n", sps->dpb_output_delay_length);
+    LOG_INFO("SPS: cpb_cnt=%d.\n", sps->cpb_cnt);
+    LOG_INFO("SPS: initial_cpb_removal_delay_length=%d.\n", sps->initial_cpb_removal_delay_length);
+    LOG_INFO("SPS: cpb_removal_delay_length=%d.\n", sps->cpb_removal_delay_length);
+    LOG_INFO("SPS: dpb_output_delay_length=%d.\n", sps->dpb_output_delay_length);
 
-    LOG_DEBUG("SPS: bit_depth_luma=%d.\n", sps->bit_depth_luma);
-    LOG_DEBUG("SPS: bit_depth_chroma=%d.\n", sps->bit_depth_chroma);
-    LOG_DEBUG("SPS: residual_color_transform_flag=%d.\n", sps->residual_color_transform_flag);
-    LOG_DEBUG("SPS: constraint_set_flags=%d.\n", sps->constraint_set_flags);
-    LOG_DEBUG("SPS: new=%d.\n", sps->new);
+    LOG_INFO("SPS: bit_depth_luma=%d.\n", sps->bit_depth_luma);
+    LOG_INFO("SPS: bit_depth_chroma=%d.\n", sps->bit_depth_chroma);
+    LOG_INFO("SPS: residual_color_transform_flag=%d.\n", sps->residual_color_transform_flag);
+    LOG_INFO("SPS: constraint_set_flags=%d.\n", sps->constraint_set_flags);
+    LOG_INFO("SPS: new=%d.\n", sps->new);
 }
 
 static void Slicer_print_pps(PPS *pps)
 {
-    LOG_DEBUG("PPS: sps_id=%u.\n", pps->sps_id);
-    LOG_DEBUG("PPS: cabac=%d.\n", pps->cabac);
-    LOG_DEBUG("PPS: pic_order_present=%d.\n", pps->pic_order_present);
-    LOG_DEBUG("PPS: slice_group_count=%d.\n", pps->slice_group_count);
-    LOG_DEBUG("PPS: mb_slice_group_map_type=%d.\n", pps->mb_slice_group_map_type);
+    LOG_INFO("PPS: sps_id=%u.\n", pps->sps_id);
+    LOG_INFO("PPS: cabac=%d.\n", pps->cabac);
+    LOG_INFO("PPS: pic_order_present=%d.\n", pps->pic_order_present);
+    LOG_INFO("PPS: slice_group_count=%d.\n", pps->slice_group_count);
+    LOG_INFO("PPS: mb_slice_group_map_type=%d.\n", pps->mb_slice_group_map_type);
 
-    LOG_DEBUG("PPS: ref_count[0]=%u.\n", pps->ref_count[0]);
-    LOG_DEBUG("PPS: ref_count[1]=%u.\n", pps->ref_count[1]);
-    LOG_DEBUG("PPS: weighted_pred=%d.\n", pps->weighted_pred);
-    LOG_DEBUG("PPS: weighted_bipred_idc=%d.\n", pps->weighted_bipred_idc);
-    LOG_DEBUG("PPS: init_qp=%d.\n", pps->init_qp);
-    LOG_DEBUG("PPS: init_qs=%d.\n", pps->init_qs);
+    LOG_INFO("PPS: ref_count[0]=%u.\n", pps->ref_count[0]);
+    LOG_INFO("PPS: ref_count[1]=%u.\n", pps->ref_count[1]);
+    LOG_INFO("PPS: weighted_pred=%d.\n", pps->weighted_pred);
+    LOG_INFO("PPS: weighted_bipred_idc=%d.\n", pps->weighted_bipred_idc);
+    LOG_INFO("PPS: init_qp=%d.\n", pps->init_qp);
+    LOG_INFO("PPS: init_qs=%d.\n", pps->init_qs);
 
-    LOG_DEBUG("PPS: chroma_qp_index_offset[0]=%d.\n", pps->chroma_qp_index_offset[0]);
-    LOG_DEBUG("PPS: chroma_qp_index_offset[1]=%d.\n", pps->chroma_qp_index_offset[1]);
-    LOG_DEBUG("PPS: deblocking_filter_parameters_present=%d.\n", pps->deblocking_filter_parameters_present);
-    LOG_DEBUG("PPS: constrained_intra_pred=%d.\n", pps->constrained_intra_pred);
-    LOG_DEBUG("PPS: redundant_pic_cnt_present=%d.\n", pps->redundant_pic_cnt_present);
+    LOG_INFO("PPS: chroma_qp_index_offset[0]=%d.\n", pps->chroma_qp_index_offset[0]);
+    LOG_INFO("PPS: chroma_qp_index_offset[1]=%d.\n", pps->chroma_qp_index_offset[1]);
+    LOG_INFO("PPS: deblocking_filter_parameters_present=%d.\n", pps->deblocking_filter_parameters_present);
+    LOG_INFO("PPS: constrained_intra_pred=%d.\n", pps->constrained_intra_pred);
+    LOG_INFO("PPS: redundant_pic_cnt_present=%d.\n", pps->redundant_pic_cnt_present);
 
-    LOG_DEBUG("PPS: transform_8x8_mode=%d.\n", pps->transform_8x8_mode);
+    LOG_INFO("PPS: transform_8x8_mode=%d.\n", pps->transform_8x8_mode);
 
     // scaling_matrix4
-    LOG_DEBUG("PPS: scaling_matrix4=");
-    print_hex(pps->scaling_matrix4, 96);
+    //LOG_INFO("PPS: scaling_matrix4=");
+    //print_hex(pps->scaling_matrix4, 96);
     // scaling_matrix8
-    LOG_DEBUG("PPS: scaling_matrix8=");
-    print_hex(pps->scaling_matrix8, 384);
+    //LOG_INFO("PPS: scaling_matrix8=");
+    //print_hex(pps->scaling_matrix8, 384);
 
     // chroma_qp_table
-    LOG_DEBUG("PPS: chroma_qp_table=");
-    print_hex(pps->chroma_qp_table, 176);
+    //LOG_INFO("PPS: chroma_qp_table=");
+    //print_hex(pps->chroma_qp_table, 176);
 
 
-    LOG_DEBUG("PPS: chroma_qp_diff=%d.\n", pps->chroma_qp_diff);
+    LOG_INFO("PPS: chroma_qp_diff=%d.\n", pps->chroma_qp_diff);
 
 }
 
@@ -402,20 +406,20 @@ int Slicer_decode_h264_extradata(Slicer_t *obj, uint8_t *extradata, int extradat
                 ff_h264_decode_extradata(h264_ctx, extradata, extradata_size);
                 LOG_DEBUG("\n");
                 // get sps and pps
-                for(n = 0; n < MAX_SPS_COUNT; n++){
+                //for(n = 0; n < MAX_SPS_COUNT; n++){
                     sps = NULL;
-                    sps = h264_ctx->sps_buffers[n];
+                    sps = h264_ctx->sps_buffers[0];
                     //LOG_DEBUG("sps=%ld, n=%d\n", sps, n);
                     if (sps)
                         Slicer_print_sps(sps);
-                }
-                for(n = 0; n < MAX_PPS_COUNT; n++){
+                //}
+                //for(n = 0; n < MAX_PPS_COUNT; n++){
                     pps = NULL;
-                    pps = h264_ctx->pps_buffers[n];
+                    pps = h264_ctx->pps_buffers[0];
                     //LOG_DEBUG("sps=%ld, n=%d\n", sps, n);
                     if(pps)
                         Slicer_print_pps(pps);
-                }
+                //}
             }
             break;
         }else{
@@ -424,6 +428,11 @@ int Slicer_decode_h264_extradata(Slicer_t *obj, uint8_t *extradata, int extradat
         }
         
     }
+
+    obj->sps = sps;
+    obj->pps = pps;
+    obj->tmp_ctx = ctx;
+
     LOG_DEBUG("\n");
     // close file
     //avformat_close_input(&ctx);
@@ -571,6 +580,7 @@ static void Slicer_print_codec_context(AVCodecContext *ctx)
 
 static void Slicer_set_video_encoder_context(Slicer_t *obj, AVCodecContext *dest, const AVCodecContext *src, AVDictionary **opts)
 {
+    LOG_INFO("Slicer_set_video_encoder_context \n");
     //Slicer_parse_sps(src->extradata, src->extradata_size);
 
     dest->height = src->height;
@@ -597,16 +607,40 @@ static void Slicer_set_video_encoder_context(Slicer_t *obj, AVCodecContext *dest
     dest->codec = NULL;
     dest->codec_tag = 0;
 
-    dest->coder_type = 1;  // FIXME: just add for test
+    LOG_INFO("pps->cabac = %d.\n", obj->pps->cabac);
+    dest->coder_type = obj->pps->cabac;  // FIXME: just add for test
     // set params for can generate same sps/pps
 
     // FIXME:  just add for test, need auto check by sps pps
-    av_dict_set(opts, "weightp", "0", 0);
+    LOG_INFO("pps->weighted_pred = %d.\n", obj->pps->weighted_pred);
+    if(obj->pps->weighted_pred){
+        av_dict_set(opts, "weightp", "1", 0);
+    }else{
+        av_dict_set(opts, "weightp", "0", 0);
+    }
+    
+    if(obj->pps->weighted_bipred_idc ){
+        av_dict_set(opts, "weightb", "1", 0);
+    }else{
+        av_dict_set(opts, "weightb", "0", 0);
+    }
+
+    LOG_INFO("sps->poc_type = %d.\n", obj->sps->poc_type);
+    if(!obj->sps->poc_type){
+        dest->max_b_frames = 3;
+
+    }else{
+        dest->max_b_frames = 0;
+        dest->flags &= !CODEC_FLAG_INTERLACED_DCT;
+    }
+
+
     dest->chromaoffset = 0; 
     av_dict_set(opts, "chroma-qp-offset", "0", 0);
     dest->me_subpel_quality = 5; 
 
     //av_dict_set(opts, "x264-params", "sps-id=6", 0);
+    LOG_INFO("Slicer_set_video_encoder_context over\n");
 }
 
 
@@ -664,6 +698,9 @@ static int Slicer_open_output_media(Slicer_t *obj)
                 return -1;
             }
 
+            //Slicer_decode_h264_extradata(obj, in_stream->codec->extradata, in_stream->codec->extradata_size);
+
+
             AVDictionary *opts = NULL;
             // set the video encoder context for open the encoder
             Slicer_set_video_encoder_context(obj, out_stream->codec, in_stream->codec, &opts);
@@ -690,8 +727,8 @@ static int Slicer_open_output_media(Slicer_t *obj)
 
             LOG_INFO("[OUT] streams[%d] extradata_size:%d.\n", i, out_stream->codec->extradata_size);
             print_hex(out_stream->codec->extradata, out_stream->codec->extradata_size);
-
             Slicer_decode_h264_extradata(obj, out_stream->codec->extradata, out_stream->codec->extradata_size);
+            
 
 
             // copy input extradata to output
@@ -1175,6 +1212,11 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
         }
 
         spkt = NULL;
+
+        // if find end, break
+        if(media_end_of_file == 1){
+            break;
+        }
     }
 
 
@@ -1541,7 +1583,8 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
     // for test, to get the video and audio packet number in one group
     int video_packets_number = 0;
     int audio_packets_number = 0;
-    int test_cnt = 0;
+    int group_cnt = 0;
+
     while(1){
         // read a gop, and to check if start or end gop. (start or end gop need transcode)
         ret = Slicer_read_group(obj, &packets_queue, &group_type);
@@ -1557,15 +1600,17 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
         int audio_packets_number = 0;
         
 
-
+        group_cnt++;
         // transcode when start group
         if ( group_type == SLICER_GROUP_TYPE_START ){
-            LOG_INFO("this is the start group \n");
+            LOG_INFO("this is the start group, group_cnt=%d \n", group_cnt);
             Slicer_video_transcode_group(obj, &packets_queue, 1);
         }
-
+        if ( group_type == SLICER_GROUP_TYPE_NORMAL ){
+            LOG_INFO("this is the normal group, group_cnt=%d \n", group_cnt);
+        }
         if ( group_type == SLICER_GROUP_TYPE_END ){
-            LOG_INFO("this is the end group \n");
+            LOG_INFO("this is the end group, group_cnt=%d \n", group_cnt);
             Slicer_video_transcode_group(obj, &packets_queue, 2);
         }
 
@@ -1576,20 +1621,11 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
 
             spkt = packets_queue.next;
             //if( (spkt->packet.flags & AV_PKT_FLAG_KEY) && (obj->first_video_stream_index == spkt->packet.stream_index))
-            if(1 && (obj->first_video_stream_index == spkt->packet.stream_index)){
+            if((obj->first_video_stream_index == spkt->packet.stream_index)){
                 LOG_DEBUG("before rebuild, get packet: stream_index:%d, pts:%lld, dts:%lld, is_key:%d, duration:%d,buf:%d \n", 
                             spkt->packet.stream_index, spkt->packet.pts, spkt->packet.dts, spkt->packet.flags&AV_PKT_FLAG_KEY, 
                             spkt->packet.duration, spkt->packet.buf);
             }
-            /*else{
-                av_free_packet(&spkt->packet);
-
-                list_del(spkt);
-                free(spkt); 
-                continue;
-            }*/
-
-
 
             // rebuild timestamp
             if(Slicer_rebuild_packet_timestamp(obj, &spkt->packet) >= 0){
@@ -1619,12 +1655,6 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
             break;
         }
 
-
-        if (test_cnt == 0){
-            test_cnt += 1;
-        }/*else{
-            break; // for test
-        }*/
     }
 
     av_write_trailer(obj->output_ctx);
@@ -1705,10 +1735,10 @@ int main(int argc, char ** argv)
 	//int start_time = atoi(argv[3]);
 	//int end_time = atoi(argv[4]);
 
-    strcpy(params.input_url, "/root/video/Meerkats.mp4");
-    strcpy(params.output_url, "s3.mp4");
-    params.start_time = 17158;
-    params.end_time = 30000;
+    strcpy(params.input_url, "/root/video/Meerkats.flv");
+    strcpy(params.output_url, "s3.flv");
+    params.start_time = 15000;
+    params.end_time = 35000;
     //params.slice_mode = SLICER_MODE_COPY_ONLY;
     params.slice_mode = SLICER_MODE_ENCODE_COPY_ENCODE;
     
