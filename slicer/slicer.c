@@ -581,6 +581,7 @@ static void Slicer_print_codec_context(AVCodecContext *ctx)
     printf("AVCodecContext:   stream_codec_tag:%d\n", ctx->stream_codec_tag);
     printf("AVCodecContext:   av_class:%s\n", ctx->av_class->class_name);
     printf("AVCodecContext:   profile:%d\n", ctx->profile);
+    printf("AVCodecContext:   level:%d\n", ctx->level);
     printf("AVCodecContext:   bit_rate:%d\n", ctx->bit_rate);
 
     printf("AVCodecContext:   rc_override_count:%d\n", ctx->rc_override_count);
@@ -982,7 +983,10 @@ static int Slicer_rebuild_packet_timestamp(Slicer_t *obj, AVPacket *pkt)
     // output stream timebase
     AVRational output_timebase = obj->output_ctx->streams[pkt->stream_index]->time_base;
 
-    int64_t first_video_frame_pts = av_rescale_q(obj->first_video_frame_pts, AV_TIME_BASE_Q, input_timebase);
+    if(obj->first_video_frame_dts == 0){
+        obj->first_video_frame_dts = av_rescale_q(pkt->dts, input_timebase, AV_TIME_BASE_Q);
+    }
+
     int64_t first_video_frame_dts = av_rescale_q(obj->first_video_frame_dts, AV_TIME_BASE_Q, input_timebase);
 
     // skip the no need packets
@@ -1144,8 +1148,7 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
         return -1;
     }
 
-    // init args
-    INIT_LIST_HEAD(packets_queue);
+
     *group_type = 0;
 
 
@@ -1233,7 +1236,7 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
         }
 
 
-        if(video_key_frame_number == 1){
+        if(video_key_frame_number >= 1){
             // add to packets_queue_head
             list_add_tail(spkt, &obj->packets_queue_head);
         }
@@ -1385,7 +1388,7 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
                 // check the packet should be skip
                 if (group_type == SLICER_GROUP_TYPE_START){
                     // if the packet timestamp < start_time, skip it.
-                    if (frame.pkt_pts < slice_start_time){
+                    if (frame.pts < slice_start_time){
                         LOG_DEBUG("frame.pts(%lld) < slice_start_time(%lld), continue. \n", frame.pts, slice_start_time);
                         free(spkt);
                         continue;
@@ -1398,7 +1401,7 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
 
                 if (group_type == SLICER_GROUP_TYPE_END){
                     // if the packet timestamp > end_time , skip it.
-                    if (frame.pkt_pts > slice_start_time){
+                    if (frame.pts > slice_start_time){
                         LOG_DEBUG("frame.pts > slice_start_time, packet stream_index:%d, dts=%lld, at the end, break. \n", spkt->packet.stream_index, spkt->packet.dts);
                         free(spkt);
                         break;
@@ -1432,6 +1435,7 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
                     // push the packet to tmp_video_head
                     list_add_tail(spkt, &tmp_video_head);
 
+                    /*
                     if (obj->first_video_frame_pts == 0){
                         obj->first_video_frame_pts = av_rescale_q_rnd(spkt->packet.pts, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
                         obj->first_video_frame_dts = av_rescale_q_rnd(spkt->packet.dts, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
@@ -1441,7 +1445,7 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
                         LOG_DEBUG("first_video_frame_pts_input_timebase:%lld, first_video_frame_dts_input_timebase:%lld.\n",  obj->first_video_frame_pts_input_timebase, obj->first_video_frame_dts_input_timebase);
                         LOG_DEBUG("[OUT] encoder extradata_size:%d.\n",  obj->output_ctx->streams[obj->first_video_stream_index]->codec->extradata_size);
                         //print_hex(obj->output_ctx->streams[obj->first_video_stream_index]->codec->extradata, obj->output_ctx->streams[obj->first_video_stream_index]->codec->extradata_size);
-                    }
+                    }*/
 
                 }else{
                     free(spkt);
@@ -1457,8 +1461,8 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
 
         }else{
             
-            if (0 && packet_skip_flag == 1){
-                LOG_DEBUG("packet_skip_flag == 1, packet stream_index:%d, dts=%lld. \n", spkt->packet.stream_index, spkt->packet.dts);
+            if (packet_skip_flag != 1){
+                LOG_DEBUG("packet_skip_flag != 1, to skip packet stream_index:%d, dts=%lld. \n", spkt->packet.stream_index, spkt->packet.dts);
                 list_del(spkt);
                 free(spkt);
             }else{
@@ -1536,7 +1540,7 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
                 LOG_DEBUG("got encoded frame to push it to queue. \n");
                 // push the packet to tmp_video_head
                 list_add_tail(spkt, &tmp_video_head);
-
+                /*
                 if (obj->first_video_frame_pts == 0){
                     obj->first_video_frame_pts = av_rescale_q_rnd(spkt->packet.pts, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
                     obj->first_video_frame_dts = av_rescale_q_rnd(spkt->packet.dts, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
@@ -1546,7 +1550,7 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
                     LOG_DEBUG("first_video_frame_pts_input_timebase:%lld, first_video_frame_dts_input_timebase:%lld.\n",  obj->first_video_frame_pts_input_timebase, obj->first_video_frame_dts_input_timebase);
                     LOG_DEBUG("[OUT] encoder extradata_size:%d.\n",  obj->output_ctx->streams[obj->first_video_stream_index]->codec->extradata_size);
                     //print_hex(obj->output_ctx->streams[obj->first_video_stream_index]->codec->extradata, obj->output_ctx->streams[obj->first_video_stream_index]->codec->extradata_size);
-                }
+                }*/
 
             }else{
                 free(spkt);
@@ -1593,6 +1597,7 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
                         spkt->packet.size);
             // push the packet to tmp_video_head
             list_add_tail(spkt, &tmp_video_head);
+            /*
             if (obj->first_video_frame_pts == 0){
                 obj->first_video_frame_pts = av_rescale_q_rnd(spkt->packet.pts, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
                 obj->first_video_frame_dts = av_rescale_q_rnd(spkt->packet.dts, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
@@ -1602,7 +1607,7 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
                 LOG_DEBUG("first_video_frame_pts_input_timebase:%lld, first_video_frame_dts_input_timebase:%lld.\n",  obj->first_video_frame_pts_input_timebase, obj->first_video_frame_dts_input_timebase);
                 LOG_DEBUG("[OUT] encoder extradata_size:%d.\n",  obj->output_ctx->streams[obj->first_video_stream_index]->codec->extradata_size);
                 //print_hex(obj->output_ctx->streams[obj->first_video_stream_index]->codec->extradata, obj->output_ctx->streams[obj->first_video_stream_index]->codec->extradata_size);
-            }
+            }*/
         }else{
             LOG_INFO("There is no data that has been encoded, break.\n");
             free(spkt);
@@ -1653,6 +1658,9 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
     int audio_packets_number = 0;
     int group_cnt = 0;
 
+    // init args
+    INIT_LIST_HEAD(&packets_queue);
+
     while(1){
         // read a gop, and to check if start or end gop. (start or end gop need transcode)
         ret = Slicer_read_group(obj, &packets_queue, &group_type);
@@ -1679,7 +1687,7 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
         }
         if ( group_type == SLICER_GROUP_TYPE_END ){
             LOG_INFO("this is the end group, group_cnt=%d \n", group_cnt);
-            Slicer_video_transcode_group(obj, &packets_queue, 2);
+            //Slicer_video_transcode_group(obj, &packets_queue, 2);
         }
 
         // write frame
@@ -1701,6 +1709,9 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
                     LOG_DEBUG("after  rebuild, get packet: stream_index:%d, pts:%lld, dts:%lld, is_key:%d, duration:%d,buf:%d  \n", 
                                 spkt->packet.stream_index, spkt->packet.pts, spkt->packet.dts, spkt->packet.flags&AV_PKT_FLAG_KEY,
                                 spkt->packet.duration, spkt->packet.buf);
+
+                LOG_DEBUG("stream:%d, nb_frames=%d.\n", spkt->packet.stream_index, obj->output_ctx->streams[spkt->packet.stream_index]->nb_frames);
+
                 // write
                 ret = av_interleaved_write_frame(obj->output_ctx, &spkt->packet);
                 //ret = av_write_frame(obj->output_ctx, &spkt->packet);
@@ -1708,6 +1719,8 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
                     LOG_ERROR("av_interleaved_write_frame error:%d\n", ret);
                     break;
                 }
+
+
             }
 
 
@@ -1716,6 +1729,7 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
             free(spkt);
         }
 
+        break; // for test, just save one gop
 
         // if the last group , break
         if(group_type == 2){
@@ -1804,8 +1818,8 @@ int main(int argc, char ** argv)
 	//int start_time = atoi(argv[3]);
 	//int end_time = atoi(argv[4]);
 
-    strcpy(params.input_url, "/root/video/Meerkats.flv");
-    strcpy(params.output_url, "s3.flv");
+    strcpy(params.input_url, "/root/video/Meerkats.ts");
+    strcpy(params.output_url, "s3.ts");
     params.start_time = 15000;
     params.end_time = 35000;
     //params.slice_mode = SLICER_MODE_COPY_ONLY;
