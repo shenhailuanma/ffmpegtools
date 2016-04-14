@@ -108,6 +108,10 @@ typedef struct {
     /**/
     char output_format[32];
 
+    /* for test */
+    char video_out_url[256];  
+    FILE * video_out_file;
+
 } Slicer_Params_t;
 
 
@@ -152,6 +156,9 @@ typedef struct {
     AVFormatContext * tmp_ctx;
     SPS *sps;
     PPS *pps;
+
+    uint8_t  video_extradata[128];
+    int video_extradata_size;
 
 } Slicer_t;
 
@@ -745,10 +752,7 @@ static int Slicer_open_output_media(Slicer_t *obj)
             Slicer_set_video_encoder_context(obj, out_stream->codec, in_stream->codec, &opts);
 
 
-            if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER){
-                LOG_DEBUG("AVFMT_GLOBALHEADER is True.\n");
-                out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-            }
+
 
             // print for test
             LOG_DEBUG("Slicer_print_codec_context in stream context.\n");
@@ -768,26 +772,17 @@ static int Slicer_open_output_media(Slicer_t *obj)
             print_hex(out_stream->codec->extradata, out_stream->codec->extradata_size);
             Slicer_decode_h264_extradata(obj, out_stream->codec->extradata, out_stream->codec->extradata_size);
             
+            memcpy(obj->video_extradata, out_stream->codec->extradata, out_stream->codec->extradata_size);
+            obj->video_extradata_size = out_stream->codec->extradata_size;
 
-
-            // copy input extradata to output
+            // copy input extradata to output, the copy frames need this
             memcpy(out_stream->codec->extradata, in_stream->codec->extradata, in_stream->codec->extradata_size);
             out_stream->codec->extradata_size = in_stream->codec->extradata_size;
 
-            // FIXME: test copy input extradata to output 
-            /*
-            uint8_t *extradata = NULL;
-            extradata = malloc(out_stream->codec->extradata_size + in_stream->codec->extradata_size + 32);
-            if(extradata == NULL){
-                LOG_ERROR("Failed to malloc for new extradata.\n");
-                return -1;
+            if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER){
+                LOG_DEBUG("AVFMT_GLOBALHEADER is True.\n");
+                out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
             }
-            memcpy(extradata, in_stream->codec->extradata, in_stream->codec->extradata_size);
-            memcpy(extradata+in_stream->codec->extradata_size, out_stream->codec->extradata, out_stream->codec->extradata_size);
-
-            free(out_stream->codec->extradata);
-            out_stream->codec->extradata_size += in_stream->codec->extradata_size;
-            */
 
         }else{
             LOG_DEBUG("slice mode no need encode, just copy it.\n");
@@ -834,7 +829,7 @@ static int Slicer_open_output_media(Slicer_t *obj)
     }
 
     // for test
-    obj->output_ctx->flags &= AVFMT_FLAG_MP4A_LATM;
+    //obj->output_ctx->flags &= AVFMT_FLAG_MP4A_LATM;
 
     av_dump_format(obj->output_ctx, 0, obj->params.output_url, 1);
 
@@ -927,6 +922,10 @@ static int Slicer_init(Slicer_t *obj, Slicer_Params_t * params)
             obj->params.slice_mode = SLICER_MODE_ENCODE_ONLY;
     }
 
+    if(strlen(params->video_out_url)){
+        strcpy(obj->params.video_out_url, params->video_out_url);
+    }
+
     /** register all ffmpeg lib**/
     av_register_all();
 
@@ -950,6 +949,9 @@ static int Slicer_init(Slicer_t *obj, Slicer_Params_t * params)
     obj->slice_start_time = obj->params.start_time * 1000;
     obj->slice_end_time   = obj->params.end_time * 1000; 
 
+    if(strlen(obj->params.video_out_url) > 0){
+        obj->params.video_out_file = fopen(obj->params.video_out_url,"w");
+    }
 
     return 0;
 }
@@ -1008,13 +1010,17 @@ static int Slicer_rebuild_packet_timestamp(Slicer_t *obj, AVPacket *pkt)
     if(pkt->dts != AV_NOPTS_VALUE){
         pkt->dts = av_rescale_q_rnd(pkt->dts - first_video_frame_dts, input_timebase, output_timebase, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
     }
-    //pkt->duration = 1; // for test
+
     if(pkt->duration > 0){
-        pkt->duration = av_rescale_q(pkt->duration, input_timebase, output_timebase);
+        //pkt->duration = av_rescale_q(pkt->duration, input_timebase, output_timebase);
+        pkt->duration = 0;
     }
+    
     if(pkt->convergence_duration){
-        pkt->convergence_duration = av_rescale_q(pkt->convergence_duration, input_timebase, output_timebase);
+        //pkt->convergence_duration = av_rescale_q(pkt->convergence_duration, input_timebase, output_timebase);
+        pkt->convergence_duration = 0;
     }
+
     pkt->pos = -1;
 
     return 0;
@@ -1254,10 +1260,12 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
         spkt = obj->packets_queue_head.next;
 
         // if packet dts>=end_time, set group_type
-        slice_end_time = av_rescale_q_rnd(obj->slice_end_time, AV_TIME_BASE_Q, obj->output_ctx->streams[spkt->packet.stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+        slice_end_time = av_rescale_q_rnd(obj->slice_end_time, AV_TIME_BASE_Q, obj->input_ctx->streams[spkt->packet.stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
         if(spkt->packet.dts >= slice_end_time){
             LOG_INFO("find the end, spkt->packet.dts(%lld) >= slice_end_time(%lld).\n", spkt->packet.dts, slice_end_time);
             media_end_of_file = 1;
+        }else{
+            LOG_DEBUG("check the end, spkt->packet.dts(%lld), slice_end_time(%lld).\n", spkt->packet.dts, slice_end_time);
         }
     
         // until video key frame
@@ -1401,8 +1409,8 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
 
                 if (group_type == SLICER_GROUP_TYPE_END){
                     // if the packet timestamp > end_time , skip it.
-                    if (frame.pts > slice_start_time){
-                        LOG_DEBUG("frame.pts > slice_start_time, packet stream_index:%d, dts=%lld, at the end, break. \n", spkt->packet.stream_index, spkt->packet.dts);
+                    if (frame.pts > slice_end_time){
+                        LOG_DEBUG("frame.pts > slice_end_time, packet stream_index:%d, dts=%lld, at the end, break. \n", spkt->packet.stream_index, spkt->packet.dts);
                         free(spkt);
                         break;
                     }else{
@@ -1687,7 +1695,7 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
         }
         if ( group_type == SLICER_GROUP_TYPE_END ){
             LOG_INFO("this is the end group, group_cnt=%d \n", group_cnt);
-            //Slicer_video_transcode_group(obj, &packets_queue, 2);
+            Slicer_video_transcode_group(obj, &packets_queue, 2);
         }
 
         // write frame
@@ -1698,9 +1706,9 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
             spkt = packets_queue.next;
             //if( (spkt->packet.flags & AV_PKT_FLAG_KEY) && (obj->first_video_stream_index == spkt->packet.stream_index))
             //if((obj->first_video_stream_index == spkt->packet.stream_index)){
-                LOG_DEBUG("before rebuild, get packet: stream_index:%d, pts:%lld, dts:%lld, is_key:%d, duration:%d,buf:%d \n", 
+                LOG_DEBUG("before rebuild, get packet: stream_index:%d, pts:%lld, dts:%lld, is_key:%d, duration:%d,buf:%d, flags:%d, side_data_elems:%d, pos:%d, convergence_duration:%d\n", 
                             spkt->packet.stream_index, spkt->packet.pts, spkt->packet.dts, spkt->packet.flags&AV_PKT_FLAG_KEY, 
-                            spkt->packet.duration, spkt->packet.buf);
+                            spkt->packet.duration, spkt->packet.buf, spkt->packet.flags, spkt->packet.side_data_elems, spkt->packet.pos, spkt->packet.convergence_duration);
             //}
 
             // rebuild timestamp
@@ -1712,7 +1720,29 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
 
                 LOG_DEBUG("stream:%d, nb_frames=%d.\n", spkt->packet.stream_index, obj->output_ctx->streams[spkt->packet.stream_index]->nb_frames);
 
+                //if(spkt->packet.stream_index != obj->first_video_stream_index){
+                //    continue;
+                //}
                 // write
+
+
+
+                if(obj->first_video_stream_index == spkt->packet.stream_index){
+                    video_packets_number++;
+                    if(obj->params.video_out_file){
+                        if(video_packets_number == 1){
+                            fwrite(obj->video_extradata, obj->video_extradata_size, 1, obj->params.video_out_file);
+                            LOG_DEBUG("fwrite,video_packets_number:%d, size:%d.\n", video_packets_number, obj->video_extradata_size);
+                            //uint8_t * tmp_data = malloc(spkt->packet.size + obj->video_extradata_size + 32);
+                            //memset(tmp_data, 0, spkt->packet.size + obj->video_extradata_size + 32);
+                            //memcpy(tmp_data, obj->video_extradata, obj->video_extradata_size);
+                            //memcpy(tmp_data+obj->video_extradata_size, spkt->packet.data, spkt->packet.size);
+                            //spkt->packet.size += obj->video_extradata_size;
+                        }
+                        LOG_DEBUG("fwrite,video_packets_number:%d, size:%d.\n", video_packets_number, spkt->packet.size);
+                        fwrite(spkt->packet.data, spkt->packet.size, 1, obj->params.video_out_file);
+                    }
+                }
                 ret = av_interleaved_write_frame(obj->output_ctx, &spkt->packet);
                 //ret = av_write_frame(obj->output_ctx, &spkt->packet);
                 if (ret < 0) {
@@ -1729,7 +1759,7 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
             free(spkt);
         }
 
-        break; // for test, just save one gop
+        //break; // for test, just save one gop
 
         // if the last group , break
         if(group_type == 2){
@@ -1818,13 +1848,15 @@ int main(int argc, char ** argv)
 	//int start_time = atoi(argv[3]);
 	//int end_time = atoi(argv[4]);
 
-    strcpy(params.input_url, "/root/video/Meerkats.ts");
-    strcpy(params.output_url, "s3.ts");
+    strcpy(params.input_url, "/root/video/Meerkats.flv");
+    strcpy(params.output_url, "s4.mp4");
     params.start_time = 15000;
-    params.end_time = 35000;
+    params.end_time = 25000;
     //params.slice_mode = SLICER_MODE_COPY_ONLY;
     params.slice_mode = SLICER_MODE_ENCODE_COPY_ENCODE;
     
+    strcpy(params.video_out_url, "video.es");
+
     ret = Slicer(&params);
     LOG_INFO("slicer return: %d\n", ret);
 
