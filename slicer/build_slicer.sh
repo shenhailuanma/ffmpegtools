@@ -111,4 +111,4 @@ ${ffmpeg_build_dir}/libavutil/libavutil.a \
 ${ffmpeg_build_dir}/libswscale/libswscale.a \
 ${ffmpeg_build_dir}/libswresample/libswresample.a \
 ${ffmpeg_build_dir}/libpostproc/libpostproc.a \
-${release_dir}/lib/libx264.a -lm  -lbz2 -lz -lpthread -g
+${release_dir}/lib/libx264.a -lm -lz -lpthread -g

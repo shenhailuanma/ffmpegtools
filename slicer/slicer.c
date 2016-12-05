@@ -1334,8 +1334,14 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
     int packet_skip_flag;
 
 
-    int64_t slice_start_time = av_rescale_q_rnd(obj->slice_start_time, AV_TIME_BASE_Q, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
-    int64_t slice_end_time   = av_rescale_q_rnd(obj->slice_end_time, AV_TIME_BASE_Q, obj->input_ctx->streams[obj->first_video_stream_index]->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+    int64_t slice_start_time = av_rescale_q_rnd(obj->slice_start_time, 
+                                AV_TIME_BASE_Q, 
+                                obj->input_ctx->streams[obj->first_video_stream_index]->time_base, 
+                                AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+    int64_t slice_end_time   = av_rescale_q_rnd(obj->slice_end_time,
+                                AV_TIME_BASE_Q, 
+                                obj->input_ctx->streams[obj->first_video_stream_index]->time_base, 
+                                AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
 
 
 
@@ -1593,7 +1599,7 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
         got_enc_frame = 0;
         ret = avcodec_encode_video2(obj->output_ctx->streams[obj->first_video_stream_index]->codec, &spkt->packet, NULL, &got_enc_frame);
         if (ret < 0){
-            LOG_ERROR("avcodec_encode_video2 failed, ret=%d\n", ret);
+            LOG_ERROR("Flushing avcodec_encode_video2 failed, ret=%d\n", ret);
             break;
         }
 
@@ -1829,33 +1835,41 @@ int Slicer(Slicer_Params_t * params)
 }
 
 
-
+void print_help(void)
+{
+    printf("");
+}
 
 
 int main(int argc, char ** argv)
 {
     int ret = 0;
 
-    LOG_INFO("Usage: ./slicer <input filename> <output filename> <start time> <end time> \n");
-    LOG_INFO("Need to pay attention to: times units is ms \n");
+    //LOG_INFO("Usage: ./slicer <input filename> <output filename> <start time> <end time> \n");
+    //LOG_INFO("Need to pay attention to: times units is ms \n");
+
+    if(argc != 5){
+        LOG_ERROR("argc=%d, command line should :./slicer <input filename> <output filename> <start time> <end time> \n", argc);
+        return -1;
+    }
 
     Slicer_Params_t params;
 
     memset(&params, 0, sizeof(Slicer_Params_t));
 
-	//char *input_filename = argv[1];
-	//char *output_filename = argv[2];
-	//int start_time = atoi(argv[3]);
-	//int end_time = atoi(argv[4]);
+	char *input_filename = argv[1];
+	char *output_filename = argv[2];
+	int start_time = atoi(argv[3]);
+	int end_time = atoi(argv[4]);
 
-    strcpy(params.input_url, "/root/video/Meerkats.flv");
-    strcpy(params.output_url, "s4.mp4");
-    params.start_time = 15000;
-    params.end_time = 25000;
+    strcpy(params.input_url, input_filename);
+    strcpy(params.output_url, output_filename);
+    params.start_time = start_time;
+    params.end_time = end_time;
     //params.slice_mode = SLICER_MODE_COPY_ONLY;
     params.slice_mode = SLICER_MODE_ENCODE_COPY_ENCODE;
     
-    strcpy(params.video_out_url, "video.es");
+    //strcpy(params.video_out_url, "video.es");
 
     ret = Slicer(&params);
     LOG_INFO("slicer return: %d\n", ret);
