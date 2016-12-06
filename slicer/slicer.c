@@ -20,7 +20,7 @@
 
 
 /****  Defines *****/
-static int Glb_Log_Level = 4;
+static int Glb_Log_Level = 3;
 #define LOG_DEBUG(format, arg...)    \
     if (Glb_Log_Level >=4) {    \
         time_t Log_Timer = time(NULL); \
@@ -157,8 +157,8 @@ typedef struct {
     SPS *sps;
     PPS *pps;
 
-    uint8_t  video_extradata[128];
-    int video_extradata_size;
+    uint8_t  video_extradata[128];  // for debug
+    int video_extradata_size;       // for debug
 
 } Slicer_t;
 
@@ -689,6 +689,103 @@ static void Slicer_set_video_encoder_context(Slicer_t *obj, AVCodecContext *dest
     LOG_INFO("Slicer_set_video_encoder_context over\n");
 }
 
+static int Slicer_open_video_codec(Slicer_t *obj, int index)
+{
+    if(obj == NULL){
+        LOG_ERROR("input arg: obj is NULL\n");
+        return -1;
+    }
+
+
+    int ret;
+    AVStream *in_stream = NULL;
+    AVStream *out_stream = NULL;
+
+    if(index < 0 || index >= obj->input_ctx->nb_streams){
+        LOG_ERROR("stream index (%d) should > 0 and < nb_streams(%d)\n", index, obj->input_ctx->nb_streams);
+        return -1;
+    }
+
+    in_stream  = obj->input_ctx->streams[index];
+    out_stream = obj->output_ctx->streams[index];
+
+    ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
+    if (ret < 0) {
+        LOG_ERROR("Failed to copy context from input to output stream codec context\n");
+        return -1;
+    }
+
+    // set some params that should just copy from in_stream 
+    out_stream->codec->codec_tag = 0;
+
+    if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER){
+        out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+    }
+
+    // find the encoder
+    AVCodec *encoder;
+    encoder = avcodec_find_encoder(in_stream->codec->codec_id);
+    if (!encoder) {
+        LOG_ERROR("Necessary encoder not found\n");
+        return -1;
+    }
+
+
+    AVDictionary *opts = NULL;
+    // set the video encoder context for open the encoder
+    Slicer_set_video_encoder_context(obj, out_stream->codec, in_stream->codec, &opts);
+
+    // print for test
+    LOG_DEBUG("Slicer_print_codec_context in stream context.\n");
+    Slicer_print_codec_context(in_stream->codec);
+    LOG_DEBUG("Slicer_print_codec_context out stream context.\n");
+    Slicer_print_codec_context(out_stream->codec);
+
+    ret = avcodec_open2(out_stream->codec, encoder, &opts);
+    if (ret < 0) {
+        LOG_ERROR("Cannot open video encoder for stream #%u\n", index);
+        return ret;
+    }
+    av_dict_free(&opts);
+    LOG_DEBUG("avcodec_open2 ok.\n");
+
+    LOG_INFO("[OUT] streams[%d] extradata(%lld), extradata_size:%d.\n", index, out_stream->codec->extradata, out_stream->codec->extradata_size);
+    print_hex(out_stream->codec->extradata, out_stream->codec->extradata_size);
+    //Slicer_decode_h264_extradata(obj, out_stream->codec->extradata, out_stream->codec->extradata_size);
+
+    memcpy(obj->video_extradata, out_stream->codec->extradata, out_stream->codec->extradata_size);
+    obj->video_extradata_size = out_stream->codec->extradata_size;
+
+    LOG_INFO("over.\n");
+    return 0;
+}
+
+static int Slicer_close_video_codec(Slicer_t *obj, int index)
+{
+    if(obj == NULL){
+        LOG_ERROR("input arg: obj is NULL\n");
+        return -1;
+    }
+
+    int i;
+    int ret;
+    AVStream *out_stream = NULL;
+
+    if(index < 0 || index >= obj->output_ctx->nb_streams){
+        LOG_ERROR("stream index (%d) should > 0 and < nb_streams(%d)\n", index, obj->output_ctx->nb_streams);
+        return -1;
+    }
+
+    out_stream = obj->output_ctx->streams[index];
+
+    ret = avcodec_close(out_stream->codec);
+
+    LOG_INFO("close index:%d codec ret=%d.\n", index, ret);
+
+    LOG_INFO("xxxxxxxxxxxxxxxxxxx extradata(%lld), extradata_size:%d.\n", out_stream->codec->extradata, out_stream->codec->extradata_size);
+
+    return 0;
+}
 
 static int Slicer_open_output_media(Slicer_t *obj)
 {
@@ -716,99 +813,40 @@ static int Slicer_open_output_media(Slicer_t *obj)
     for (i = 0; i < obj->input_ctx->nb_streams; i++) {
         in_stream  = obj->input_ctx->streams[i];
 
+        // default just copy stream
+        out_stream = avformat_new_stream(obj->output_ctx, in_stream->codec->codec);
+        if (!out_stream) {
+            LOG_ERROR("Failed allocating output stream\n");
+            return -1;
+        }
+
+        ret = 0;
+        ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
+        if (ret < 0) {
+            LOG_ERROR("Failed to copy context from input to output stream codec context\n");
+            return -1;
+        }
+
+        // set some params that should just copy from in_stream 
+        out_stream->codec->codec_tag = 0;
+
+        // copy extradata (no need because avcodec_copy_context() has done)
+        //memcpy(out_stream->codec->extradata, in_stream->codec->extradata, in_stream->codec->extradata_size);
+        //out_stream->codec->extradata_size = in_stream->codec->extradata_size;
+
+        if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER){
+            out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+        }
+
+
         // if slice mode need encode, should open the video encoder
         if((in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) && 
             (obj->params.slice_mode == SLICER_MODE_ENCODE_ONLY || obj->params.slice_mode == SLICER_MODE_ENCODE_COPY_ENCODE)){
             
             LOG_DEBUG("slice mode need encode, to open the encoder.\n");
+            //Slicer_open_video_codec(obj, i);
 
-
-            // find the encoder
-            AVCodec *encoder;
-            encoder = avcodec_find_encoder(in_stream->codec->codec_id);
-            if (!encoder) {
-                LOG_ERROR("Necessary encoder not found\n");
-                return -1;
-            }
-            LOG_DEBUG("open the encoder %d ok.\n", in_stream->codec->codec_id);
-
-            out_stream = avformat_new_stream(obj->output_ctx, encoder);
-            //out_stream = avformat_new_stream(obj->output_ctx, NULL);
-
-            LOG_DEBUG("add new stream %d ok.\n", out_stream);
-
-            ret = 0;
-            ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
-            if (ret < 0) {
-                LOG_ERROR("Failed to copy context from input to output stream codec context\n");
-                return -1;
-            }
-
-            //Slicer_decode_h264_extradata(obj, in_stream->codec->extradata, in_stream->codec->extradata_size);
-
-
-            AVDictionary *opts = NULL;
-            // set the video encoder context for open the encoder
-            Slicer_set_video_encoder_context(obj, out_stream->codec, in_stream->codec, &opts);
-
-
-
-
-            // print for test
-            LOG_DEBUG("Slicer_print_codec_context in stream context.\n");
-            Slicer_print_codec_context(in_stream->codec);
-            LOG_DEBUG("Slicer_print_codec_context out stream context.\n");
-            Slicer_print_codec_context(out_stream->codec);
-
-            ret = avcodec_open2(out_stream->codec, encoder, &opts);
-            if (ret < 0) {
-                LOG_ERROR("Cannot open video encoder for stream #%u\n", i);
-                return ret;
-            }
-            av_dict_free(&opts);
-            LOG_DEBUG("avcodec_open2 ok.\n");
-
-            LOG_INFO("[OUT] streams[%d] extradata_size:%d.\n", i, out_stream->codec->extradata_size);
-            print_hex(out_stream->codec->extradata, out_stream->codec->extradata_size);
-            Slicer_decode_h264_extradata(obj, out_stream->codec->extradata, out_stream->codec->extradata_size);
-            
-            memcpy(obj->video_extradata, out_stream->codec->extradata, out_stream->codec->extradata_size);
-            obj->video_extradata_size = out_stream->codec->extradata_size;
-
-            // copy input extradata to output, the copy frames need this
-            memcpy(out_stream->codec->extradata, in_stream->codec->extradata, in_stream->codec->extradata_size);
-            out_stream->codec->extradata_size = in_stream->codec->extradata_size;
-
-            if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER){
-                LOG_DEBUG("AVFMT_GLOBALHEADER is True.\n");
-                out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-            }
-
-        }else{
-            LOG_DEBUG("slice mode no need encode, just copy it.\n");
-
-            out_stream = avformat_new_stream(obj->output_ctx, in_stream->codec->codec);
-            if (!out_stream) {
-                LOG_ERROR("Failed allocating output stream\n");
-                return -1;
-            }
-
-            ret = 0;
-            ret = avcodec_copy_context(out_stream->codec, in_stream->codec);
-            if (ret < 0) {
-                LOG_ERROR("Failed to copy context from input to output stream codec context\n");
-                return -1;
-            }
-
-            // set some params that should just copy from in_stream 
-            out_stream->codec->codec_tag = 0;
-
-            if (obj->output_ctx->oformat->flags & AVFMT_GLOBALHEADER){
-                LOG_DEBUG("AVFMT_GLOBALHEADER is True.\n");
-                out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-            }
         }
-
 
 
 
@@ -1155,7 +1193,7 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
     }
 
 
-    *group_type = 0;
+    *group_type = SLICER_GROUP_TYPE_NORMAL;
 
 
 
@@ -1264,13 +1302,11 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
         if(spkt->packet.dts >= slice_end_time){
             LOG_INFO("find the end, spkt->packet.dts(%lld) >= slice_end_time(%lld).\n", spkt->packet.dts, slice_end_time);
             media_end_of_file = 1;
-        }else{
-            LOG_DEBUG("check the end, spkt->packet.dts(%lld), slice_end_time(%lld).\n", spkt->packet.dts, slice_end_time);
         }
     
         // until video key frame
         if( (spkt->packet.flags & AV_PKT_FLAG_KEY) && (obj->first_video_stream_index == spkt->packet.stream_index) && (out_queue_has_video_key > 0) ){
-            LOG_DEBUG(" get one gop, break.\n");
+            LOG_INFO(" get one gop, break.\n");
             break;
         }
 
@@ -1302,16 +1338,16 @@ static int Slicer_read_group(Slicer_t *obj, list_t * packets_queue, int * group_
     // set group type
     if (obj->packets_group_count == 0){
         *group_type = 1;
-        obj->packets_group_count = 1;
+        obj->packets_group_count = SLICER_GROUP_TYPE_START;
 
     }else{
         obj->packets_group_count += 1;
-        *group_type = 0;
+        *group_type = SLICER_GROUP_TYPE_NORMAL;
     }
 
     if(media_end_of_file){
         obj->packets_group_count += 1;
-        *group_type = 2;
+        *group_type = SLICER_GROUP_TYPE_END;
     }
     return 0;
 }
@@ -1354,6 +1390,10 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
     // default skip the no need packet
     packet_skip_flag = 0;
 
+
+    // open the video codec
+    Slicer_open_video_codec(obj, obj->first_video_stream_index); // fixme:
+
     // while has packets
     while(group_head->next != group_head){
         spkt = group_head->next;
@@ -1391,7 +1431,8 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
                 // get the packet pts
                 if(timestamp_head.next != &timestamp_head){
                     tsptr = timestamp_head.next;
-                    frame.pts = tsptr->dts;
+                    //frame.pts = tsptr->dts;
+                    //frame.pkt_pts = tsptr->pts;
                     //frame.pkt_dts = tsptr->dts;
                     list_del(tsptr);
                     free(tsptr);
@@ -1629,6 +1670,9 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
         }
     }
 
+    // close the video codec
+    Slicer_close_video_codec(obj, obj->first_video_stream_index);// fixme:
+
 
     // move the packets to group_head
     LOG_DEBUG("to move the packets to group_head. \n");
@@ -1662,7 +1706,7 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
     }
 
     int ret;
-    int group_type = 0;
+    int group_type = SLICER_GROUP_TYPE_NORMAL;
     list_t packets_queue;
     Slicer_Packet_t * spkt = NULL;
 
@@ -1694,14 +1738,14 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
         // transcode when start group
         if ( group_type == SLICER_GROUP_TYPE_START ){
             LOG_INFO("this is the start group, group_cnt=%d \n", group_cnt);
-            Slicer_video_transcode_group(obj, &packets_queue, 1);
+            Slicer_video_transcode_group(obj, &packets_queue, group_type);
         }
         if ( group_type == SLICER_GROUP_TYPE_NORMAL ){
             LOG_INFO("this is the normal group, group_cnt=%d \n", group_cnt);
         }
         if ( group_type == SLICER_GROUP_TYPE_END ){
             LOG_INFO("this is the end group, group_cnt=%d \n", group_cnt);
-            Slicer_video_transcode_group(obj, &packets_queue, 2);
+            Slicer_video_transcode_group(obj, &packets_queue, group_type);
         }
 
         // write frame
@@ -1724,7 +1768,7 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
                                 spkt->packet.stream_index, spkt->packet.pts, spkt->packet.dts, spkt->packet.flags&AV_PKT_FLAG_KEY,
                                 spkt->packet.duration, spkt->packet.buf);
 
-                LOG_DEBUG("stream:%d, nb_frames=%d.\n", spkt->packet.stream_index, obj->output_ctx->streams[spkt->packet.stream_index]->nb_frames);
+                //LOG_DEBUG("stream:%d, nb_frames=%d.\n", spkt->packet.stream_index, obj->output_ctx->streams[spkt->packet.stream_index]->nb_frames);
 
                 //if(spkt->packet.stream_index != obj->first_video_stream_index){
                 //    continue;
@@ -1768,7 +1812,7 @@ static int Slicer_slice_encode_copy_encode(Slicer_t *obj)
         //break; // for test, just save one gop
 
         // if the last group , break
-        if(group_type == 2){
+        if(group_type == SLICER_GROUP_TYPE_END){
             LOG_INFO("this is the last group, break.\n");
             break;
         }
