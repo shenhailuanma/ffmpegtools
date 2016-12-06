@@ -20,7 +20,7 @@
 
 
 /****  Defines *****/
-static int Glb_Log_Level = 3;
+static int Glb_Log_Level = 4;
 #define LOG_DEBUG(format, arg...)    \
     if (Glb_Log_Level >=4) {    \
         time_t Log_Timer = time(NULL); \
@@ -1359,9 +1359,12 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
     list_t tmp_video_head;
     list_t tmp_audio_head;
     list_t timestamp_head;
+    list_t * ts_head;
+
 
     Slicer_Packet_t * spkt = NULL;
     Slicer_timestamp_t * tsptr = NULL;
+    Slicer_timestamp_t * tsone = NULL;
 
     AVFrame  frame;
     int got_dec_frame;
@@ -1394,6 +1397,8 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
     // open the video codec
     Slicer_open_video_codec(obj, obj->first_video_stream_index); // fixme:
 
+    int64_t pts_dts=0;
+
     // while has packets
     while(group_head->next != group_head){
         spkt = group_head->next;
@@ -1401,7 +1406,8 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
 
         if(spkt->packet.stream_index == obj->first_video_stream_index){
             //LOG_DEBUG("to decode the packet. \n");
-            LOG_DEBUG("packet stream_index:%d, pts=%lld,dts=%lld, is_key=%d. \n", spkt->packet.stream_index,  spkt->packet.pts, spkt->packet.dts, spkt->packet.flags&AV_PKT_FLAG_KEY);
+            LOG_DEBUG("packet stream_index:%d, pts=%lld,dts=%lld, is_key=%d. \n", 
+                spkt->packet.stream_index,  spkt->packet.pts, spkt->packet.dts, spkt->packet.flags&AV_PKT_FLAG_KEY);
             got_dec_frame = 0;
             memset(&frame, 0, sizeof(frame));
             frame.extended_data = NULL;
@@ -1412,11 +1418,31 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
             memset(tsptr, 0, sizeof(Slicer_timestamp_t));
             tsptr->pts = spkt->packet.pts;
             tsptr->dts = spkt->packet.dts;
-            list_add_tail(tsptr, &timestamp_head);
+
+            if(pts_dts == 0){
+                pts_dts = tsptr->pts - tsptr->dts;
+            }
+
+            ts_head = &timestamp_head;
+            /*
+            while(ts_head->next != &timestamp_head){
+                tsone = ts_head->next;
+                printf("xxxxxxxxxxxxxxxxxxxxxx pts=%lld\n", tsone->pts);
+                if(tsptr->pts < tsone->pts){
+                    break;
+                }
+
+                ts_head = ts_head->next;
+            }
+            printf("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n");
+            */
+
+            list_add_tail(tsptr, ts_head);
 
 
             // decode the video 
-            ret = avcodec_decode_video2(obj->input_ctx->streams[obj->first_video_stream_index]->codec, &frame, &got_dec_frame, &spkt->packet);
+            ret = avcodec_decode_video2(obj->input_ctx->streams[obj->first_video_stream_index]->codec, 
+                                        &frame, &got_dec_frame, &spkt->packet);
             if (ret < 0) {
                 LOG_ERROR("avcodec_decode_video2 failed, ret=%d\n", ret);
                 break;
@@ -1431,7 +1457,8 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
                 // get the packet pts
                 if(timestamp_head.next != &timestamp_head){
                     tsptr = timestamp_head.next;
-                    //frame.pts = tsptr->dts;
+                    frame.pts = tsptr->dts + pts_dts;
+                    printf("xxxxxxxxxxxxxxxxxxxxxx pts=%lld\n", frame.pts);
                     //frame.pkt_pts = tsptr->pts;
                     //frame.pkt_dts = tsptr->dts;
                     list_del(tsptr);
@@ -1688,7 +1715,7 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
         if (spkt != &tmp_audio_head){
             list_del(spkt);
             list_add_tail(spkt, group_head);
-            //LOG_DEBUG("packet stream_index:%d, dts=%lld. \n", spkt->packet.stream_index, spkt->packet.dts);
+            LOG_DEBUG("packet stream_index:%d, dts=%lld. \n", spkt->packet.stream_index, spkt->packet.dts);
         }
     }
 
