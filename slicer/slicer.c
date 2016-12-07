@@ -1556,13 +1556,22 @@ static int Slicer_video_transcode_group(Slicer_t *obj, list_t * group_head, int 
 
     }
 
+    int group_free_cnt = 0;
+    // free the group no need data
+    while(group_head->next != group_head){
+        spkt = group_head->next;
+        list_del(spkt);
+
+        LOG_INFO("group_free_cnt=%d\n", ++group_free_cnt);
+    }
+
     // flush the decoder and encoder
     LOG_INFO("Flushing stream #%u decoder\n", obj->first_video_stream_index);
     while (1) {
         
         spkt = malloc(sizeof(Slicer_Packet_t));
         if ( spkt == NULL){
-            LOG_ERROR("malloc Slicer_Packet_t failed, ret=%d\n");
+            LOG_ERROR("malloc Slicer_Packet_t failed\n");
             break;
         }
 
